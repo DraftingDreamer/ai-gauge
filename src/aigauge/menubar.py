@@ -46,6 +46,7 @@ OK_COLORS = {
 NEUTRAL_COLOR = "#6b7280"
 SETUP_COLOR = "#38bdf8"
 ERROR_COLOR = OK_COLORS["high"]
+_NON_USAGE_PROVIDERS = {"codex_resets", "claude_resets"}
 
 
 def _provider_label(provider: str) -> str:
@@ -97,6 +98,7 @@ def status_items(
             _provider_color(config, provider, snapshots.get(provider)),
         )
         for provider in enabled_providers
+        if provider not in _NON_USAGE_PROVIDERS
     ]
 
 
@@ -131,7 +133,10 @@ def render_menubar_pixmap(
     ``is_dark`` is accepted for API compatibility with earlier text rendering.
     Dot colors stay full-saturation in both modes.
     """
-    providers = list(enabled_providers)
+    providers = [
+        provider for provider in enabled_providers
+        if provider not in _NON_USAGE_PROVIDERS
+    ]
     width = PIXMAP_WIDTH
     height = PIXMAP_HEIGHT
 

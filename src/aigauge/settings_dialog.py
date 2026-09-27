@@ -810,6 +810,12 @@ class SettingsDialog(QDialog):
         self.antigravity_cb.setToolTip("Show the Antigravity usage tile in the panel.")
         self.antigravity_cb.setChecked(config.providers.antigravity)
         providers_layout.addWidget(self.antigravity_cb)
+        self.codex_resets_cb = QCheckBox("Codex Resets")
+        self.codex_resets_cb.setChecked(config.providers.codex_resets)
+        providers_layout.addWidget(self.codex_resets_cb)
+        self.claude_resets_cb = QCheckBox("Claude Resets")
+        self.claude_resets_cb.setChecked(config.providers.claude_resets)
+        providers_layout.addWidget(self.claude_resets_cb)
 
         # ----- Claude accounts -----
         claude_accounts = QGroupBox("Claude Accounts")
@@ -1126,6 +1132,63 @@ class SettingsDialog(QDialog):
         antigravity_tab_layout.addWidget(antigravity)
         antigravity_tab_layout.addStretch(1)
 
+        resets_tab = QWidget()
+        resets_layout = QVBoxLayout(resets_tab)
+        resets_layout.setContentsMargins(10, 10, 10, 10)
+        resets_layout.setSpacing(10)
+
+        codex_resets_group = QGroupBox("Codex")
+        codex_resets_layout = QVBoxLayout(codex_resets_group)
+        self.codex_notify_announced_cb = QCheckBox(
+            "Notify when a reset is announced"
+        )
+        self.codex_notify_landed_cb = QCheckBox("Notify when a reset lands")
+        self.codex_notify_banked_cb = QCheckBox(
+            "Notify when a reset credit is granted"
+        )
+        self.codex_notify_announced_cb.setChecked(config.codex_resets.notify_announced)
+        self.codex_notify_landed_cb.setChecked(config.codex_resets.notify_landed)
+        self.codex_notify_banked_cb.setChecked(config.codex_resets.notify_banked)
+        for checkbox in (
+            self.codex_notify_announced_cb,
+            self.codex_notify_landed_cb,
+            self.codex_notify_banked_cb,
+        ):
+            codex_resets_layout.addWidget(checkbox)
+        codex_resets_layout.addWidget(_hint_label(
+            "Codex Resets is an unofficial tracker (codex-resets.com) that uses "
+            "AI to classify posts by @thsottiaux. Not affiliated with OpenAI; "
+            "announcements can be misclassified."
+        ))
+        codex_resets_layout.addWidget(_hint_label(
+            '<a href="https://codex-resets.com">Data from Codex Resets</a>'
+        ))
+        resets_layout.addWidget(codex_resets_group)
+
+        claude_resets_group = QGroupBox("Claude")
+        claude_resets_layout = QVBoxLayout(claude_resets_group)
+        self.claude_notify_landed_cb = QCheckBox("Notify when a reset lands")
+        self.claude_notify_banked_cb = QCheckBox(
+            "Notify when a reset credit is granted"
+        )
+        self.claude_notify_landed_cb.setChecked(config.claude_resets.notify_landed)
+        self.claude_notify_banked_cb.setChecked(config.claude_resets.notify_banked)
+        claude_resets_layout.addWidget(self.claude_notify_landed_cb)
+        claude_resets_layout.addWidget(self.claude_notify_banked_cb)
+        claude_resets_layout.addWidget(_hint_label(
+            "Claude Resets is an unofficial tracker (claude-resets.com) of posts "
+            "by @ClaudeDevs and Claude Code team members. Not affiliated with "
+            "Anthropic; new entries can be provisional for up to 24 hours."
+        ))
+        claude_resets_layout.addWidget(_hint_label(
+            '<a href="https://claude-resets.com">Data from Claude Resets</a>'
+        ))
+        resets_layout.addWidget(claude_resets_group)
+        resets_layout.addWidget(_hint_label(
+            "When enabled, AI Gauge contacts each tracker at most every 15 minutes."
+        ))
+        resets_layout.addStretch(1)
+
         opencode_go_tab = QWidget()
         opencode_go_tab_layout = QVBoxLayout(opencode_go_tab)
         opencode_go_tab_layout.setContentsMargins(10, 10, 10, 10)
@@ -1202,6 +1265,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(copilot_tab, "GitHub Copilot")
         tabs.addTab(openrouter_tab, "OpenRouter")
         tabs.addTab(antigravity_tab, "Antigravity")
+        tabs.addTab(resets_tab, "Reset alerts")
         tabs.addTab(mcp_tab, "MCP")
         self.local_usage_panel = LocalUsagePanel(
             config, self._browser_accounts, local_usage_service
@@ -1282,6 +1346,8 @@ class SettingsDialog(QDialog):
             "copilot": 4,
             "openrouter": 5,
             "antigravity": 6,
+            "codex_resets": 7,
+            "claude_resets": 7,
         }.get(kind)
         if tab_index is not None:
             self.tabs.setCurrentIndex(tab_index)
@@ -1664,6 +1730,8 @@ class SettingsDialog(QDialog):
         config.providers.copilot = self.copilot_cb.isChecked()
         config.providers.openrouter = self.openrouter_cb.isChecked()
         config.providers.antigravity = self.antigravity_cb.isChecked()
+        config.providers.codex_resets = self.codex_resets_cb.isChecked()
+        config.providers.claude_resets = self.claude_resets_cb.isChecked()
         config.providers.opencode_go = self.opencode_go_cb.isChecked()
         for account_id, kind in self._removed_browser_accounts.items():
             if kind == "opencode_go":
@@ -1693,6 +1761,13 @@ class SettingsDialog(QDialog):
             self.antigravity_show_third_party_cb.isChecked()
         )
         config.antigravity.colors = self.antigravity_colors.value()
+        config.codex_resets.notify_announced = (
+            self.codex_notify_announced_cb.isChecked()
+        )
+        config.codex_resets.notify_landed = self.codex_notify_landed_cb.isChecked()
+        config.codex_resets.notify_banked = self.codex_notify_banked_cb.isChecked()
+        config.claude_resets.notify_landed = self.claude_notify_landed_cb.isChecked()
+        config.claude_resets.notify_banked = self.claude_notify_banked_cb.isChecked()
         # Keep the legacy singleton fields synchronized for downgrade safety;
         # account rows are the source of truth from schema version 2 onward.
         first_opencode = next(

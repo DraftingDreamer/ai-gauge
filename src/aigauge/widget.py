@@ -14,12 +14,14 @@ from PyQt6.QtCore import (
     QEvent,
     QRectF,
     QSize,
+    QUrl,
     Qt,
     QTimer,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
     QColor,
+    QDesktopServices,
     QIcon,
     QMouseEvent,
     QPainter,
@@ -88,6 +90,8 @@ PROVIDER_ORDER = (
     "copilot",
     "openrouter",
     "antigravity",
+    "codex_resets",
+    "claude_resets",
 )
 COLLAPSED_MIN_HEIGHT = WINDOW_COLLAPSED_MIN_HEIGHT
 EXPANDED_MIN_WIDTH = WINDOW_MIN_WIDTH
@@ -975,6 +979,7 @@ class _ProviderTile(QFrame):
     """A provider section: header line + N metric rows."""
 
     sign_in_requested = pyqtSignal(str)  # provider name
+    dismiss_requested = pyqtSignal(str)  # provider name
     details_requested = pyqtSignal(str)  # provider name (when error label is clicked)
     ratio_history_requested = pyqtSignal(str)  # provider name (ratio label clicked)
     expanded_changed = pyqtSignal(str, bool)  # provider name, expanded
@@ -1003,9 +1008,7 @@ class _ProviderTile(QFrame):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self.status.setTextFormat(Qt.TextFormat.RichText)
-        self.status.linkActivated.connect(
-            lambda _href: self.details_requested.emit(self.provider)
-        )
+        self.status.linkActivated.connect(self._on_status_link)
 
         # Session->weekly burn rate, shown on the right of the header when OK.
         # Sits in the space the (hidden) Sign in button / (empty) status label
@@ -1045,6 +1048,24 @@ class _ProviderTile(QFrame):
         self.expand_btn.setToolTip("Show top models")
         self.expand_btn.clicked.connect(self._on_expand_clicked)
 
+        self.dismiss_btn = QPushButton("✕")
+        self.dismiss_btn.setFixedSize(16, 16)
+        self.dismiss_btn.setStyleSheet(self.expand_btn.styleSheet())
+        self.dismiss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dismiss_btn.setToolTip("Dismiss this announcement")
+        self.dismiss_btn.hide()
+        self.dismiss_btn.clicked.connect(
+            lambda: self.dismiss_requested.emit(self.provider)
+        )
+
+        self.open_btn = QPushButton("↗")
+        self.open_btn.setFixedSize(16, 16)
+        self.open_btn.setStyleSheet(self.expand_btn.styleSheet())
+        self.open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_btn.setToolTip("Open the post")
+        self.open_btn.hide()
+        self.open_btn.clicked.connect(self._open_event_post)
+
         self._header_row = QHBoxLayout()
         self._header_row.setContentsMargins(0, 0, 0, 0)
         self._header_row.addWidget(self.expand_btn)
@@ -1062,6 +1083,8 @@ class _ProviderTile(QFrame):
         self._header_row.addWidget(self._compact_summary)
         self._header_row.addWidget(self.action_btn)
         self._header_row.addWidget(self.ratio_label)
+        self._header_row.addWidget(self.dismiss_btn)
+        self._header_row.addWidget(self.open_btn)
         self._header_row.addWidget(self.status)
 
         self._rows: list[_MetricRow] = []
@@ -1090,6 +1113,18 @@ class _ProviderTile(QFrame):
 
         # Show skeleton state immediately so first launch isn't a blank tile.
         self.set_snapshot(None)
+
+    def _on_status_link(self, href: str) -> None:
+        if href.startswith(("http://", "https://")):
+            QDesktopServices.openUrl(QUrl(href))
+        else:
+            self.details_requested.emit(self.provider)
+
+    def _open_event_post(self) -> None:
+        snapshot = self._latest_snapshot
+        url = snapshot.raw.get("event_url") if snapshot and snapshot.raw else None
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def _inline_compact_minimum_width(self) -> int:
         widgets = [
@@ -1251,6 +1286,8 @@ class _ProviderTile(QFrame):
 
     def set_snapshot(self, snapshot: UsageSnapshot | None) -> None:
         self._latest_snapshot = snapshot
+        self.dismiss_btn.hide()
+        self.open_btn.hide()
         if snapshot is None:
             self.status.setText("loading…")
             self.status.setStyleSheet(
@@ -1338,7 +1375,16 @@ class _ProviderTile(QFrame):
         # snapshot, but it is an important provider state rather than merely a
         # red progress bar. Surface it in the header until the reset arrives.
         limit_hit = _claude_weekly_limit_hit(snapshot)
-        self.status.setText("limit hit" if limit_hit else "")
+        is_resets = self.provider in ("codex_resets", "claude_resets")
+        if is_resets:
+            tracker = "Codex" if self.provider == "codex_resets" else "Claude"
+            url = f"https://{tracker.lower()}-resets.com"
+            credit = f'<a href="{url}">via {tracker} Resets</a>'
+            self.status.setText(
+                credit if snapshot.metrics else f"no new announcements · {credit}"
+            )
+        else:
+            self.status.setText("limit hit" if limit_hit else "")
         self.status.setStyleSheet(
             (
                 "color: #ef4444; font-size: 10px; font-style: normal; "
@@ -1350,8 +1396,14 @@ class _ProviderTile(QFrame):
         self.status.setToolTip(
             _claude_limit_hit_tooltip(snapshot) if limit_hit else ""
         )
-        self.status.setCursor(Qt.CursorShape.ArrowCursor)
+        self.status.setCursor(
+            Qt.CursorShape.PointingHandCursor if is_resets
+            else Qt.CursorShape.ArrowCursor
+        )
         self.action_btn.setVisible(False)
+        if is_resets and snapshot.metrics:
+            self.dismiss_btn.show()
+            self.open_btn.show()
         has_breakdown = any(m.tag for m in snapshot.metrics)
         compact_metrics = (
             self._compact_metrics_from(snapshot)
@@ -1624,6 +1676,7 @@ class UsageWidget(QWidget):
     refresh_requested = pyqtSignal()
     settings_requested = pyqtSignal()
     sign_in_requested = pyqtSignal(str)
+    dismiss_requested = pyqtSignal(str)
     details_requested = pyqtSignal(str)
     ratio_history_requested = pyqtSignal(str)
     tile_expanded_changed = pyqtSignal(str, bool)
@@ -1883,6 +1936,7 @@ class UsageWidget(QWidget):
                 self,
             )
             tile.sign_in_requested.connect(self.sign_in_requested.emit)
+            tile.dismiss_requested.connect(self.dismiss_requested.emit)
             tile.details_requested.connect(self.details_requested.emit)
             tile.ratio_history_requested.connect(self.ratio_history_requested.emit)
             tile.expanded_changed.connect(self.tile_expanded_changed.emit)

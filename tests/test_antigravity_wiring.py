@@ -32,7 +32,7 @@ def test_antigravity_threshold_label_and_order():
     config.antigravity.colors = colors
     assert thresholds_for_provider(config, "antigravity") == colors
     assert PROVIDER_LABELS["antigravity"] == "Ag"
-    assert PROVIDER_ORDER[-1] == "antigravity"
+    assert PROVIDER_ORDER.index("antigravity") == PROVIDER_ORDER.index("openrouter") + 1
 
 
 def test_mcp_account_ids_follow_antigravity_toggle():

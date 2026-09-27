@@ -116,6 +116,8 @@ class ProviderToggles(BaseModel):
     copilot: bool = True
     openrouter: bool = False
     antigravity: bool = False
+    codex_resets: bool = False
+    claude_resets: bool = False
     opencode_go: bool = False
 
 
@@ -163,6 +165,14 @@ class AntigravityConfig(BaseModel):
     cli_path: str | None = None
     show_gemini: bool = True
     show_third_party: bool = True
+
+
+class ResetsConfig(BaseModel):
+    notify_announced: bool = True
+    notify_landed: bool = True
+    notify_banked: bool = True
+    last_event_key: str | None = None
+    dismissed_event_key: str | None = None
 
 
 class OpenCodeGoConfig(BaseModel):
@@ -226,6 +236,8 @@ class Config(BaseModel):
     copilot: CopilotConfig = Field(default_factory=CopilotConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     antigravity: AntigravityConfig = Field(default_factory=AntigravityConfig)
+    codex_resets: ResetsConfig = Field(default_factory=ResetsConfig)
+    claude_resets: ResetsConfig = Field(default_factory=ResetsConfig)
     opencode_go: OpenCodeGoConfig = Field(default_factory=OpenCodeGoConfig)
     expanded_tiles: list[str] = Field(default_factory=list)
     collapsed_tiles: list[str] = Field(default_factory=list)
@@ -375,6 +387,8 @@ def provider_base_name(kind: str) -> str:
         "codex": "Codex",
         "opencode_go": "OpenCode",
         "antigravity": "Antigravity",
+        "codex_resets": "Codex Resets",
+        "claude_resets": "Claude Resets",
     }.get(kind, kind.title())
 
 
@@ -434,6 +448,8 @@ def display_name_for_account(config: Config, account_id: str) -> str:
         "copilot": "Copilot",
         "openrouter": "OpenRouter",
         "antigravity": "Antigravity",
+        "codex_resets": "Codex Resets",
+        "claude_resets": "Claude Resets",
         "opencode_go": "OpenCode",
     }.get(account_id, account_id)
 

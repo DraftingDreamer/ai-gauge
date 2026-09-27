@@ -7,10 +7,10 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from PyQt6.QtCore import QObject, QLockFile, QPoint, Qt, QTimer
-from PyQt6.QtGui import QAction, QCursor, QIcon
+from PyQt6.QtCore import QObject, QLockFile, QPoint, Qt, QTimer, QUrl
+from PyQt6.QtGui import QAction, QCursor, QDesktopServices, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -44,6 +44,9 @@ from .providers.codex import CodexProvider
 from .providers.copilot import CopilotProvider
 from .providers.openrouter import OpenRouterProvider
 from .providers.antigravity import AntigravityProvider
+from .providers.claude_resets import ClaudeResetsProvider
+from .providers.codex_resets import CodexResetsProvider
+from .providers._resets_common import build_snapshot
 from .providers.opencode_go import OpenCodeGoProvider
 from .ratio import RatioStore, sessions_per_week
 from .ratio_dialog import RatioHistoryDialog
@@ -103,6 +106,10 @@ def _enabled_providers(config: Config) -> tuple[str, ...]:
         out.append("openrouter")
     if getattr(config.providers, "antigravity", False):
         out.append("antigravity")
+    if getattr(config.providers, "codex_resets", False):
+        out.append("codex_resets")
+    if getattr(config.providers, "claude_resets", False):
+        out.append("claude_resets")
     return tuple(out)
 
 
@@ -262,6 +269,7 @@ class App(QObject):
         self._widget.refresh_requested.connect(lambda: self.refresh_now(manual=True))
         self._widget.settings_requested.connect(self.open_settings)
         self._widget.sign_in_requested.connect(self.open_login)
+        self._widget.dismiss_requested.connect(self._on_dismiss_requested)
         self._widget.details_requested.connect(self.open_error_details)
         self._widget.ratio_history_requested.connect(self.open_ratio_history)
         self._widget.tile_expanded_changed.connect(self._on_tile_expanded_changed)
@@ -285,6 +293,7 @@ class App(QObject):
         self._app_menu = self._build_app_menu()
         self._install_widget_context_menu()
         self._native_status = None
+        self._last_reset_notification_url: str | None = None
 
         if self._ui_mode == "menubar":
             try:
@@ -317,6 +326,7 @@ class App(QObject):
             if self._ui_mode != "menubar":
                 self._tray.setContextMenu(self._app_menu)
             self._tray.activated.connect(self._on_tray_activated)
+            self._tray.messageClicked.connect(self._on_reset_notification_clicked)
             self._tray.show()
         else:
             self._tray = None
@@ -429,7 +439,10 @@ class App(QObject):
             self._invalidate_usage_cache()
             return
         try:
-            write_usage_cache(self._snapshots)
+            write_usage_cache({
+                name: snapshot for name, snapshot in self._snapshots.items()
+                if name not in ("codex_resets", "claude_resets")
+            })
         except (OSError, ValueError):
             log.exception("failed to publish MCP usage cache")
 
@@ -479,6 +492,19 @@ class App(QObject):
             )
             desired_tiles.add("antigravity")
             self._widget.ensure_tile("antigravity", "Antigravity")
+        for name, provider_class in (
+            ("codex_resets", CodexResetsProvider),
+            ("claude_resets", ClaudeResetsProvider),
+        ):
+            if not getattr(self._config.providers, name):
+                continue
+            provider = provider_class()
+            provider.dismissed_event_key = getattr(
+                self._config, name
+            ).dismissed_event_key
+            self._providers[name] = provider
+            desired_tiles.add(name)
+            self._widget.ensure_tile(name, provider.display_name)
         for tile_id in list(self._widget._tiles):  # noqa: SLF001
             if tile_id not in desired_tiles:
                 self._widget.remove_tile(tile_id)
@@ -654,6 +680,8 @@ class App(QObject):
             self._snapshots.get(snapshot.provider),
         )
         self._snapshots[snapshot.provider] = snapshot
+        if snapshot.provider in ("codex_resets", "claude_resets"):
+            self._on_reset_event(snapshot.provider)
         if getattr(self._config, "mcp_enabled", False):
             self._sync_usage_cache()
         self._cycle_signatures[snapshot.provider] = _snapshot_signature(snapshot)
@@ -715,6 +743,66 @@ class App(QObject):
             self._widget.set_refreshing(False)
             self._update_tray()
             self._schedule_next_refresh()
+
+    def _on_reset_event(self, name: str) -> None:
+        provider = self._providers.get(name)
+        event = getattr(provider, "latest_event", None)
+        if event is None:
+            return
+        settings = getattr(self._config, name)
+        if event.key == settings.last_event_key:
+            return
+        if settings.last_event_key is not None and getattr(
+            settings, f"notify_{event.kind}", False
+        ):
+            tray = getattr(self, "_tray", None)
+            if tray is not None and QSystemTrayIcon.isSystemTrayAvailable():
+                product = "Codex" if name == "codex_resets" else "Claude"
+                if event.kind == "announced":
+                    title = f"{product} reset announced"
+                    message = (
+                        f"A {event.summary} was announced. Click to open the post."
+                    )
+                elif event.kind == "landed":
+                    title = f"{product} reset landed"
+                    message = "Usage limits were refilled. Click to open the post."
+                else:
+                    title = f"{product} reset credit granted"
+                    message = (
+                        f"A banked reset is available to redeem in {product}. "
+                        "Click to open the post."
+                    )
+                tray.showMessage(
+                    title, message, QSystemTrayIcon.MessageIcon.Information
+                )
+                self._last_reset_notification_url = event.url
+        settings.last_event_key = event.key
+        self._config.save()
+
+    def _on_reset_notification_clicked(self) -> None:
+        url = self._last_reset_notification_url
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _on_dismiss_requested(self, name: str) -> None:
+        if name not in ("codex_resets", "claude_resets"):
+            return
+        provider = self._providers.get(name)
+        event = getattr(provider, "latest_event", None)
+        if event is None:
+            return
+        settings = getattr(self._config, name)
+        settings.dismissed_event_key = event.key
+        provider.dismissed_event_key = event.key
+        self._config.save()
+        snapshot = build_snapshot(
+            provider.name, provider.latest_event, provider.dismissed_event_key,
+            datetime.now(timezone.utc),
+        )
+        self._snapshots[name] = snapshot
+        self._widget.update_snapshot(
+            snapshot, display_name_for_account(self._config, name)
+        )
 
     def _cycle_changed(self) -> bool:
         if self._last_cycle_signatures is None:
