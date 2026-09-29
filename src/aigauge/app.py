@@ -798,7 +798,7 @@ class App(QObject):
         self,
         title: str,
         message: str,
-        url: str,
+        url: str | None,
         provider: str,
         kind: str,
         event_id: str,
@@ -829,6 +829,18 @@ class App(QObject):
                 return
 
         title, message, url, provider, kind, event_id = queue.pop(0)
+        if sys.platform == "win32":
+            from . import windows_toast
+
+            if windows_toast.show_toast(title, message, url):
+                self._last_reset_notification_shown_at = time.monotonic()
+                log.info(
+                    "reset notification shown provider=%s kind=%s event_id=%s via=toast",
+                    provider, kind, event_id,
+                )
+                self._show_next_reset_notification()
+                return
+
         tray = getattr(self, "_tray", None)
         if tray is None:
             log.info(
@@ -847,7 +859,7 @@ class App(QObject):
             self._last_reset_notification_url = url
             self._last_reset_notification_shown_at = time.monotonic()
             log.info(
-                "reset notification shown provider=%s kind=%s event_id=%s",
+                "reset notification shown provider=%s kind=%s event_id=%s via=tray",
                 provider, kind, event_id,
             )
         self._show_next_reset_notification()

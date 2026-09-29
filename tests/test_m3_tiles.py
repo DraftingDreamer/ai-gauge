@@ -23,7 +23,7 @@ def watch_payload(source=None, **changes):
         "reset_chance_percent": 37,
         "forecast_window": "later this week",
         "observed_at": "2026-09-27T11:00:00Z",
-        "expires_at": "2026-09-29T11:00:00Z",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
         "text": "Synthetic activity suggests a possible reset.",
         "source": source if source is not None else {"type": "observed"},
     }
@@ -169,6 +169,7 @@ def test_watch_display_expiry_elision_and_url(qtbot, monkeypatch):
     watch = _parse_watch(watch_payload(
         {"type": "observed", "url": source_url},
         forecast_window=forecast,
+        expires_at="2026-09-29T11:00:00Z",
     ))
     snapshot = build_snapshot("codex_resets", None, None, NOW, watch=watch)
     widget.update_snapshot(snapshot, "Codex Resets")

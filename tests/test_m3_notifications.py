@@ -25,6 +25,7 @@ def event(kind, event_id, provider):
 
 
 def make_app(monkeypatch, *, tray=None):
+    monkeypatch.setattr(app_module, "sys", SimpleNamespace(platform="linux"))
     config = Config()
     config.codex_resets.last_event_key = "landed:old-codex"
     config.claude_resets.last_event_key = "landed:old-claude"

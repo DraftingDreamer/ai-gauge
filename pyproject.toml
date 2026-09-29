@@ -28,6 +28,11 @@ dependencies = [
     "pydantic>=2.6",
     "keyring>=25.0",
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    "winrt-runtime>=3.2,<4; sys_platform == 'win32'",
+    "winrt-Windows.Data.Xml.Dom>=3.2,<4; sys_platform == 'win32'",
+    "winrt-Windows.Foundation>=3.2,<4; sys_platform == 'win32'",
+    "winrt-Windows.Foundation.Collections>=3.2,<4; sys_platform == 'win32'",
+    "winrt-Windows.UI.Notifications>=3.2,<4; sys_platform == 'win32'",
 ]
 
 [project.urls]
