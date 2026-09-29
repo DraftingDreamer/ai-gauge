@@ -34,6 +34,28 @@ class ResetEvent:
         return f"{self.kind}:{self.id}"
 
 
+@dataclass(frozen=True)
+class ResetWatch:
+    level: str
+    reset_chance_percent: int | None
+    forecast_window: str
+    observed_at: datetime
+    expires_at: datetime
+    text: str
+    source_url: str | None
+
+    @property
+    def key(self) -> str:
+        return f"{self.observed_at.astimezone(timezone.utc).isoformat()}:{self.level}"
+
+
+def watch_is_dismissed(watch: ResetWatch, dismissed_key: str | None) -> bool:
+    observed = watch.observed_at.astimezone(timezone.utc).isoformat()
+    return dismissed_key == f"{observed}:{watch.level}" or (
+        watch.level == "elevated" and dismissed_key == f"{observed}:strong"
+    )
+
+
 KIND_LABEL = {"announced": "Announced", "landed": "Reset", "banked": "Banked"}
 
 
@@ -58,10 +80,20 @@ def build_snapshot(
     dismissed_key: str | None,
     now: datetime,
     error: str | None = None,
+    watch: ResetWatch | None = None,
+    dismissed_watch_key: str | None = None,
 ) -> UsageSnapshot:
-    dismissed = event is not None and event.key == dismissed_key
+    event_dismissed = event is not None and event.key == dismissed_key
+    active_watch = watch if watch is not None and now < watch.expires_at else None
+    watch_dismissed = (
+        active_watch is not None
+        and watch_is_dismissed(active_watch, dismissed_watch_key)
+    )
+    dismissed = (event is not None or active_watch is not None) and (
+        event is None or event_dismissed
+    ) and (active_watch is None or watch_dismissed)
     metrics: list[UsageMetric] = []
-    if event is not None and not dismissed:
+    if event is not None and not event_dismissed:
         metrics.append(
             UsageMetric(
                 label=(
@@ -73,6 +105,26 @@ def build_snapshot(
                 reset_label=None,
                 window=None,
                 note=event.detail,
+                tag=None,
+            )
+        )
+    if active_watch is not None and not watch_dismissed:
+        chance = active_watch.reset_chance_percent
+        value = active_watch.level
+        if chance is not None:
+            value += f" · {chance}%"
+        value += f" · {active_watch.forecast_window} (AI)"
+        metrics.append(
+            UsageMetric(
+                label=f"Watch · {value}",
+                percent_used=None,
+                resets_at=None,
+                reset_label=None,
+                window=None,
+                note=(
+                    f"{active_watch.text}\n{active_watch.forecast_window}\n"
+                    "AI forecast by Codex Resets, not an official announcement."
+                ),
                 tag=None,
             )
         )
@@ -88,6 +140,11 @@ def build_snapshot(
             "event_url": event.url if event is not None else None,
             "provisional": event.provisional if event is not None else False,
             "dismissed": dismissed,
+            **({
+                "watch_key": active_watch.key if active_watch is not None else None,
+                "watch_url": active_watch.source_url if active_watch is not None else None,
+                "watch_dismissed": watch_dismissed,
+            } if watch is not None else {}),
         },
     )
 
@@ -100,6 +157,8 @@ class ResetsProviderBase(Provider):
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.dismissed_event_key: str | None = None
         self.latest_event: ResetEvent | None = None
+        self.latest_watch: ResetWatch | None = None
+        self.dismissed_watch_key: str | None = None
         self._etag: str | None = None
         self._last_success_at: datetime | None = None
         self._next_allowed_at = datetime.min.replace(tzinfo=timezone.utc)
@@ -159,7 +218,9 @@ class ResetsProviderBase(Provider):
                 and now - self._last_success_at < self.MIN_INTERVAL
             ):
                 return build_snapshot(
-                    self.name, self.latest_event, self.dismissed_event_key, now
+                    self.name, self.latest_event, self.dismissed_event_key, now,
+                    watch=self.latest_watch,
+                    dismissed_watch_key=self.dismissed_watch_key,
                 )
             try:
                 event = self._fetch_latest_event()
@@ -170,11 +231,15 @@ class ResetsProviderBase(Provider):
                     self.dismissed_event_key,
                     now,
                     error=str(exc)[:200],
+                    watch=self.latest_watch,
+                    dismissed_watch_key=self.dismissed_watch_key,
                 )
             self.latest_event = event
             self._last_success_at = now
             return build_snapshot(
-                self.name, self.latest_event, self.dismissed_event_key, now
+                self.name, self.latest_event, self.dismissed_event_key, now,
+                watch=self.latest_watch,
+                dismissed_watch_key=self.dismissed_watch_key,
             )
 
         self._run_async(work, on_done)

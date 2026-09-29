@@ -173,6 +173,7 @@ class ResetsConfig(BaseModel):
     notify_banked: bool = True
     last_event_key: str | None = None
     dismissed_event_key: str | None = None
+    dismissed_watch_key: str | None = None
 
 
 class OpenCodeGoConfig(BaseModel):

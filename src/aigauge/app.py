@@ -504,6 +504,9 @@ class App(QObject):
             provider.dismissed_event_key = getattr(
                 self._config, name
             ).dismissed_event_key
+            provider.dismissed_watch_key = getattr(
+                self._config, name
+            ).dismissed_watch_key
             self._providers[name] = provider
             desired_tiles.add(name)
             self._widget.ensure_tile(name, provider.display_name)
@@ -860,15 +863,25 @@ class App(QObject):
             return
         provider = self._providers.get(name)
         event = getattr(provider, "latest_event", None)
-        if event is None:
+        watch = getattr(provider, "latest_watch", None) if name == "codex_resets" else None
+        now = datetime.now(timezone.utc)
+        if watch is not None and now >= watch.expires_at:
+            watch = None
+        if event is None and watch is None:
             return
         settings = getattr(self._config, name)
-        settings.dismissed_event_key = event.key
-        provider.dismissed_event_key = event.key
+        if event is not None:
+            settings.dismissed_event_key = event.key
+            provider.dismissed_event_key = event.key
+        if watch is not None:
+            settings.dismissed_watch_key = watch.key
+            provider.dismissed_watch_key = watch.key
         self._config.save()
         snapshot = build_snapshot(
             provider.name, provider.latest_event, provider.dismissed_event_key,
-            datetime.now(timezone.utc),
+            now,
+            watch=watch,
+            dismissed_watch_key=getattr(provider, "dismissed_watch_key", None),
         )
         self._snapshots[name] = snapshot
         self._widget.update_snapshot(
@@ -1494,7 +1507,8 @@ class App(QObject):
 
     def _on_tile_expanded_changed(self, provider: str, expanded: bool) -> None:
         compact_collapsible = (
-            provider == "opencode_go"
+            provider == "antigravity"
+            or provider == "opencode_go"
             or provider.startswith("opencode_go-")
             or provider == "claude"
             or provider == "codex"

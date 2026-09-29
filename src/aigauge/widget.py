@@ -693,6 +693,8 @@ class _MetricRow(QWidget):
         self._available_width = WINDOW_MAX_WIDTH
         self._reset_natural_width = 0
         self._reset_stacked = False
+        self._elide_value = False
+        self._full_value = ""
 
     def set_available_width(self, available_width: int) -> bool:
         self._available_width = max(0, available_width)
@@ -713,6 +715,7 @@ class _MetricRow(QWidget):
     def _sync_responsive_layout(self) -> bool:
         should_stack_reset = (
             self._split_note
+            and not self._elide_value
             and (
                 self.label.minimumWidth()
                 + self._reset_natural_width
@@ -721,6 +724,20 @@ class _MetricRow(QWidget):
             > self._available_width
         )
         changed = False
+
+        if self._elide_value:
+            width = max(
+                0,
+                self._available_width - self.label.minimumWidth()
+                - self._main_layout.spacing(),
+            )
+            display = self.reset.fontMetrics().elidedText(
+                self._full_value, Qt.TextElideMode.ElideRight, width
+            )
+            if self.reset.text() != display or self.reset.width() != width:
+                self.reset.setText(display)
+                self.reset.setFixedWidth(width)
+                changed = True
 
         if should_stack_reset != self._reset_stacked:
             self._main_layout.removeWidget(self.reset)
@@ -748,7 +765,7 @@ class _MetricRow(QWidget):
                 self.reset.setMinimumWidth(0)
                 self.reset.setMaximumWidth(wrapped_width)
                 changed = True
-        elif self._split_note:
+        elif self._split_note and not self._elide_value:
             if (
                 self.reset.wordWrap()
                 or self.reset.width() != self._reset_natural_width
@@ -771,6 +788,7 @@ class _MetricRow(QWidget):
         reset_label: str | None = None,
         note: str | None = None,
         window: timedelta | None = None,
+        elide_value: bool = False,
     ) -> None:
         # Reset to flexible width; group alignment in _set_rows may pin it after.
         self.label.setMinimumWidth(MIN_LABEL_WIDTH)
@@ -783,6 +801,7 @@ class _MetricRow(QWidget):
             and " · " in label
         )
         self._split_note = split_note
+        self._elide_value = elide_value and split_note
         self.reset.setWordWrap(False)
         if split_note:
             left, right = label.split(" · ", 1)
@@ -825,12 +844,14 @@ class _MetricRow(QWidget):
         )
         if split_note:
             self.reset.setText(right)
+            self._full_value = right
             self.reset.setVisible(True)
             right_width = self.reset.fontMetrics().horizontalAdvance(right) + 4
             self._reset_natural_width = max(92, right_width)
             self.reset.setFixedWidth(self._reset_natural_width)
             self.reset.setToolTip("")
         else:
+            self._full_value = ""
             self.reset.setText(rel)
             self.reset.setVisible(bool(rel))
             self._reset_natural_width = (
@@ -1072,10 +1093,15 @@ class _ProviderTile(QFrame):
         self._header_row.addWidget(self.header)
 
         self._compact_metrics: list[_CompactMetric] = []
+        self._compact_group_rows: list[QWidget] = []
         self._compact_summary = QWidget(self)
         self._compact_summary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._compact_summary.setVisible(False)
-        self._compact_layout = QHBoxLayout(self._compact_summary)
+        self._compact_layout = (
+            QVBoxLayout(self._compact_summary)
+            if self.provider == "antigravity"
+            else QHBoxLayout(self._compact_summary)
+        )
         self._compact_layout.setContentsMargins(4, 0, 0, 0)
         self._compact_layout.setSpacing(6)
         self._compact_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -1122,9 +1148,17 @@ class _ProviderTile(QFrame):
 
     def _open_event_post(self) -> None:
         snapshot = self._latest_snapshot
-        url = snapshot.raw.get("event_url") if snapshot and snapshot.raw else None
+        url = self._reset_open_url(snapshot)
         if url:
             QDesktopServices.openUrl(QUrl(url))
+
+    @staticmethod
+    def _reset_open_url(snapshot: UsageSnapshot | None) -> str | None:
+        if snapshot is None or not snapshot.metrics or not snapshot.raw:
+            return None
+        if snapshot.metrics[0].label.startswith("Watch · "):
+            return snapshot.raw.get("watch_url")
+        return snapshot.raw.get("event_url")
 
     def _inline_compact_minimum_width(self) -> int:
         widgets = [
@@ -1180,7 +1214,7 @@ class _ProviderTile(QFrame):
                 row._inline_minimum_width()
                 for row in self._rows
                 if (not row.bar.isHidden() and not row.pct.isHidden())
-                or row._split_note
+                or (row._split_note and not row._elide_value)
             ),
             default=0,
         )
@@ -1193,7 +1227,10 @@ class _ProviderTile(QFrame):
         self._available_width = max(0, available_width)
         should_wrap = (
             not self._compact_summary.isHidden()
-            and self._inline_compact_minimum_width() > self._available_width
+            and (
+                self.provider == "antigravity"
+                or self._inline_compact_minimum_width() > self._available_width
+            )
         )
         layout_changed = self._compact_below_header != should_wrap
         if layout_changed:
@@ -1217,7 +1254,9 @@ class _ProviderTile(QFrame):
                 self._header_row.insertWidget(3, self._compact_summary)
             self._compact_below_header = should_wrap
         for item in self._compact_metrics:
-            item.set_bar_expanding(self._compact_below_header)
+            item.set_bar_expanding(
+                self._compact_below_header and self.provider != "antigravity"
+            )
         rows_changed = False
         row_width = self._row_available_width()
         for row in self._rows:
@@ -1238,14 +1277,22 @@ class _ProviderTile(QFrame):
             self.set_snapshot(self._latest_snapshot)
 
     def _supports_compact_collapse(self) -> bool:
-        return _provider_family(self.provider) in ("claude", "codex", "opencode_go")
+        return _provider_family(self.provider) in (
+            "claude", "codex", "opencode_go", "antigravity"
+        )
 
     def _compact_metrics_from(self, snapshot: UsageSnapshot) -> list:
         metrics = [
             metric
             for metric in snapshot.metrics
-            if metric.tag is None and metric.percent_used is not None
+            if metric.tag is None
+            and (metric.percent_used is not None or self.provider == "antigravity")
         ]
+        if self.provider == "antigravity":
+            return [
+                metric for metric in metrics
+                if metric.label.rsplit(" ", 1)[-1] in ("5h", "weekly")
+            ]
         if _provider_family(self.provider) == "opencode_go":
             return [
                 metric
@@ -1255,6 +1302,9 @@ class _ProviderTile(QFrame):
         return metrics
 
     def _set_compact_metrics(self, metrics: list, *, show_reset: bool = True) -> None:
+        if self.provider == "antigravity":
+            self._set_antigravity_compact_metrics(metrics, show_reset=show_reset)
+            return
         while len(self._compact_metrics) < len(metrics):
             item = _CompactMetric(self._compact_summary)
             self._compact_metrics.append(item)
@@ -1269,6 +1319,41 @@ class _ProviderTile(QFrame):
             item.set_metric(metric, show_reset=show_reset)
             item.show()
         self._compact_summary.setVisible(bool(metrics))
+        self.set_available_width(self._available_width)
+
+    def _set_antigravity_compact_metrics(
+        self, metrics: list, *, show_reset: bool = True
+    ) -> None:
+        for row in self._compact_group_rows:
+            self._compact_layout.removeWidget(row)
+            row.hide()
+            row.setParent(None)
+            row.deleteLater()
+        self._compact_group_rows.clear()
+        self._compact_metrics.clear()
+        groups: dict[str, list] = {}
+        for metric in metrics:
+            group, _, window = metric.label.rpartition(" ")
+            if group and window in ("5h", "weekly"):
+                groups.setdefault(group, []).append(metric)
+        for group, group_metrics in groups.items():
+            row = QWidget(self._compact_summary)
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(4)
+            label = QLabel(group)
+            label.setFixedWidth(76)
+            label.setStyleSheet("color:#d1d5db; font-size:10px;")
+            layout.addWidget(label)
+            for metric in group_metrics:
+                item = _CompactMetric(row)
+                item.set_metric(metric, show_reset=show_reset)
+                item.code.setText("5" if metric.label.endswith(" 5h") else "W")
+                layout.addWidget(item)
+                self._compact_metrics.append(item)
+            self._compact_layout.addWidget(row)
+            self._compact_group_rows.append(row)
+        self._compact_summary.setVisible(bool(groups))
         self.set_available_width(self._available_width)
 
     def _hide_compact_metrics(self) -> None:
@@ -1321,6 +1406,9 @@ class _ProviderTile(QFrame):
             return
 
         if snapshot.status == SnapshotStatus.ERROR:
+            if self.provider in ("codex_resets", "claude_resets") and snapshot.metrics:
+                self.dismiss_btn.show()
+                self.open_btn.setVisible(bool(self._reset_open_url(snapshot)))
             label = (
                 "error · stale"
                 if snapshot.metrics
@@ -1403,7 +1491,7 @@ class _ProviderTile(QFrame):
         self.action_btn.setVisible(False)
         if is_resets and snapshot.metrics:
             self.dismiss_btn.show()
-            self.open_btn.show()
+            self.open_btn.setVisible(bool(self._reset_open_url(snapshot)))
         has_breakdown = any(m.tag for m in snapshot.metrics)
         compact_metrics = (
             self._compact_metrics_from(snapshot)
@@ -1547,7 +1635,10 @@ class _ProviderTile(QFrame):
             self._rows,
             rows,
         ):
-            row.set_metric(label, pct, reset, reset_label, note, window)
+            row.set_metric(
+                label, pct, reset, reset_label, note, window,
+                elide_value=self.provider == "codex_resets" and label.startswith("Watch · "),
+            )
         self._normalize_gauge_columns()
         row_width = self._row_available_width()
         for row in self._rows:
@@ -2005,6 +2096,8 @@ class UsageWidget(QWidget):
         tile = self.ensure_tile(snapshot.provider, display_name)
         self._snapshots[snapshot.provider] = snapshot
         tile.set_snapshot(snapshot)
+        if snapshot.provider in ("codex_resets", "claude_resets"):
+            tile.setVisible(not bool(snapshot.raw.get("dismissed")))
         tile.set_refreshing(False)
         self._last_fetch_at = max(
             snapshot.fetched_at, self._last_fetch_at or snapshot.fetched_at
@@ -2439,7 +2532,10 @@ class UsageWidget(QWidget):
             return
         self._collapsed_label.setText("")
         self._collapsed_label.hide()
-        providers = sorted(self._tiles, key=self._tile_sort_key)
+        providers = sorted(
+            (name for name, tile in self._tiles.items() if not tile.isHidden()),
+            key=self._tile_sort_key,
+        )
         margins = self._collapsed_widget.layout().contentsMargins()
         # Wrap chips against the pill's real width rather than a fixed 340px,
         # so a narrowed pill reflows instead of overflowing (issue #7).
