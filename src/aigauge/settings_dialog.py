@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import sys
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 
 from PyQt6.QtCore import QPointF, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import (
@@ -20,6 +22,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -62,7 +65,7 @@ from .local_usage.settings_panel import LocalUsagePanel
 from .logging_setup import log_path
 from .providers.claude import CLAUDE_USAGE_URL
 from .providers.codex import CODEX_USAGE_URL
-from .providers.antigravity import resolve_cli
+from .providers.antigravity import normalize_cli_path, resolve_cli
 from .startup import set_start_at_login
 from .webview.cookies import clear_browser_session  # lazy inside; no WebEngine at import
 
@@ -1053,15 +1056,32 @@ class SettingsDialog(QDialog):
             config.antigravity.show_third_party
         )
         antigravity_form.addRow("", self.antigravity_show_third_party_cb)
+        self.antigravity_cli_path_edit = QLineEdit(config.antigravity.cli_path or "")
         try:
-            cli_path = resolve_cli(config.antigravity.cli_path)
+            detected_cli = resolve_cli(None)
         except OSError:
-            cli_path = None
-        self.antigravity_cli_path_label = QLabel(cli_path or "agy CLI not found")
-        self.antigravity_cli_path_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
+            detected_cli = None
+        self.antigravity_cli_path_edit.setPlaceholderText(
+            f"Auto-detect ({detected_cli})" if detected_cli else "Auto-detect"
         )
-        antigravity_form.addRow("agy CLI:", self.antigravity_cli_path_label)
+        cli_path_row = QWidget()
+        cli_path_layout = QHBoxLayout(cli_path_row)
+        cli_path_layout.setContentsMargins(0, 0, 0, 0)
+        cli_path_layout.setSpacing(8)
+        cli_path_layout.addWidget(self.antigravity_cli_path_edit, 1)
+        browse_cli_button = QPushButton("Browse…")
+        self.antigravity_cli_browse_button = browse_cli_button
+        browse_cli_button.clicked.connect(self._browse_antigravity_cli)
+        cli_path_layout.addWidget(browse_cli_button)
+        antigravity_form.addRow("agy CLI:", cli_path_row)
+        self.antigravity_cli_path_status = QLabel()
+        self.antigravity_cli_path_status.setWordWrap(True)
+        self.antigravity_cli_path_status.setMaximumWidth(460)
+        antigravity_form.addRow("", self.antigravity_cli_path_status)
+        self.antigravity_cli_path_edit.textChanged.connect(
+            self._update_antigravity_cli_status
+        )
+        self._update_antigravity_cli_status()
         antigravity_form.addRow(
             "",
             _hint_label(
@@ -1691,6 +1711,40 @@ class SettingsDialog(QDialog):
         index = self.sign_in_browser_combo.findData(browser_id)
         self.sign_in_browser_combo.setCurrentIndex(index if index >= 0 else 0)
 
+    def _browse_antigravity_cli(self) -> None:
+        file_filter = (
+            "agy (agy.exe);;Programs (*.exe);;All files (*)"
+            if sys.platform == "win32"
+            else "All files (*)"
+        )
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Antigravity CLI",
+            normalize_cli_path(self.antigravity_cli_path_edit.text()) or "",
+            file_filter,
+        )
+        if selected:
+            self.antigravity_cli_path_edit.setText(selected)
+
+    def _update_antigravity_cli_status(self) -> None:
+        configured_path = normalize_cli_path(self.antigravity_cli_path_edit.text())
+        if configured_path:
+            if Path(configured_path).is_file():
+                status = f"Using: {configured_path}"
+            else:
+                status = f"Not found: {configured_path}"
+        else:
+            try:
+                detected_cli = resolve_cli(None)
+            except OSError:
+                detected_cli = None
+            status = (
+                f"Using auto-detected: {detected_cli}"
+                if detected_cli
+                else "agy CLI not found. Install the Antigravity CLI or set its path."
+            )
+        self.antigravity_cli_path_status.setText(status)
+
     def apply_to(self, config: Config) -> None:
         config.refresh_interval_minutes = self.refresh_spin.value()
         config.active_refresh_interval_minutes = min(
@@ -1759,6 +1813,9 @@ class SettingsDialog(QDialog):
         config.antigravity.show_gemini = self.antigravity_show_gemini_cb.isChecked()
         config.antigravity.show_third_party = (
             self.antigravity_show_third_party_cb.isChecked()
+        )
+        config.antigravity.cli_path = normalize_cli_path(
+            self.antigravity_cli_path_edit.text()
         )
         config.antigravity.colors = self.antigravity_colors.value()
         config.codex_resets.notify_announced = (

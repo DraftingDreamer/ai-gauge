@@ -156,11 +156,22 @@ def test_new_event_notifies_by_kind_and_respects_toggle(
 def test_same_id_announced_then_landed_notifies_twice(monkeypatch):
     tray = Mock()
     app, provider, _ = make_app(monkeypatch, tray=tray)
+    timers = []
+    clock = [100.0]
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        app_module.QTimer, "singleShot", lambda delay, callback: timers.append(
+            (delay, callback)
+        )
+    )
     app._config.codex_resets.last_event_key = "landed:old"
     provider.latest_event = event("announced", "same")
     app._on_reset_event("codex_resets")
     provider.latest_event = event("landed", "same")
     app._on_reset_event("codex_resets")
+    assert tray.showMessage.call_count == 1
+    clock[0] += app_module._RESET_NOTIFICATION_SPACING_MS / 1000
+    timers.pop()[1]()
     assert tray.showMessage.call_count == 2
     assert app._config.codex_resets.last_event_key == "landed:same"
 
@@ -225,6 +236,14 @@ def test_mcp_cache_excludes_reset_snapshots(monkeypatch):
 def test_notification_click_opens_last_post(monkeypatch):
     tray = Mock()
     app, provider, _ = make_app(monkeypatch, tray=tray)
+    timers = []
+    clock = [100.0]
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        app_module.QTimer, "singleShot", lambda delay, callback: timers.append(
+            (delay, callback)
+        )
+    )
     app._config.codex_resets.last_event_key = "landed:old"
     opened = Mock()
     monkeypatch.setattr(app_module.QDesktopServices, "openUrl", opened)
@@ -232,6 +251,8 @@ def test_notification_click_opens_last_post(monkeypatch):
     app._on_reset_event("codex_resets")
     provider.latest_event = event(id="2")
     app._on_reset_event("codex_resets")
+    clock[0] += app_module._RESET_NOTIFICATION_SPACING_MS / 1000
+    timers.pop()[1]()
     app._on_reset_notification_clicked()
     assert opened.call_count == 1
     assert opened.call_args.args[0].toString() == event(id="2").url

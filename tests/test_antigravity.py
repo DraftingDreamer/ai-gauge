@@ -31,7 +31,7 @@ def _sync(provider: AntigravityProvider, monkeypatch) -> None:
 
 
 def _refresh_with_payload(monkeypatch, payload: dict) -> AntigravityProvider:
-    provider = AntigravityProvider(cli_path="agy")
+    provider = AntigravityProvider()
     _sync(provider, monkeypatch)
     monkeypatch.setattr(antigravity, "resolve_cli", lambda _: "agy")
     monkeypatch.setattr(
@@ -240,7 +240,7 @@ def test_missing_executable_reports_error(monkeypatch):
     ],
 )
 def test_cli_start_and_timeout_errors(monkeypatch, exception, expected):
-    provider = AntigravityProvider(cli_path="agy")
+    provider = AntigravityProvider()
     _sync(provider, monkeypatch)
     monkeypatch.setattr(antigravity, "resolve_cli", lambda _: "agy")
 

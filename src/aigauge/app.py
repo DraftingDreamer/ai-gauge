@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -82,6 +83,7 @@ _ACTIVE_MODE_MINUTES = 30
 _STALE_ERROR_RETRY_MINUTES = 1
 _HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000
 _LOG_VALUE_LIMIT = 300
+_RESET_NOTIFICATION_SPACING_MS = 8000
 
 
 def _enabled_providers(config: Config) -> tuple[str, ...]:
@@ -752,35 +754,104 @@ class App(QObject):
         settings = getattr(self._config, name)
         if event.key == settings.last_event_key:
             return
-        if settings.last_event_key is not None and getattr(
+        should_notify = settings.last_event_key is not None and getattr(
             settings, f"notify_{event.kind}", False
-        ):
-            tray = getattr(self, "_tray", None)
-            if tray is not None and QSystemTrayIcon.isSystemTrayAvailable():
-                product = "Codex" if name == "codex_resets" else "Claude"
-                if event.kind == "announced":
-                    title = f"{product} reset announced"
-                    message = (
-                        f"A {event.summary} was announced. Click to open the post."
-                    )
-                elif event.kind == "landed":
-                    title = f"{product} reset landed"
-                    message = "Usage limits were refilled. Click to open the post."
-                else:
-                    title = f"{product} reset credit granted"
-                    message = (
-                        f"A banked reset is available to redeem in {product}. "
-                        "Click to open the post."
-                    )
-                tray.showMessage(
-                    title, message, QSystemTrayIcon.MessageIcon.Information
-                )
-                self._last_reset_notification_url = event.url
+        )
+        first_event = settings.last_event_key is None
         settings.last_event_key = event.key
         self._config.save()
+        if first_event:
+            log.info(
+                "reset notification skipped provider=%s reason=first run, recorded without notification",
+                name,
+            )
+            return
+        if not should_notify:
+            log.info(
+                "reset notification skipped provider=%s kind=%s reason=disabled in settings",
+                name, event.kind,
+            )
+            return
+
+        product = "Codex" if name == "codex_resets" else "Claude"
+        if event.kind == "announced":
+            title = f"{product} reset announced"
+            message = f"A {event.summary} was announced. Click to open the post."
+        elif event.kind == "landed":
+            title = f"{product} reset landed"
+            message = "Usage limits were refilled. Click to open the post."
+        else:
+            title = f"{product} reset credit granted"
+            message = (
+                f"A banked reset is available to redeem in {product}. "
+                "Click to open the post."
+            )
+        self._enqueue_reset_notification(
+            title, message, event.url, name, event.kind, event.id
+        )
+
+    def _enqueue_reset_notification(
+        self,
+        title: str,
+        message: str,
+        url: str,
+        provider: str,
+        kind: str,
+        event_id: str,
+    ) -> None:
+        queue = self.__dict__.get("_reset_notification_queue")
+        if queue is None:
+            queue = []
+            self._reset_notification_queue = queue
+        queue.append((title, message, url, provider, kind, event_id))
+        self._show_next_reset_notification()
+
+    def _show_next_reset_notification(self) -> None:
+        queue = self.__dict__.get("_reset_notification_queue")
+        if not queue or self.__dict__.get("_reset_notification_scheduled", False):
+            return
+        last_shown_at = self.__dict__.get("_last_reset_notification_shown_at")
+        if last_shown_at is not None:
+            elapsed_ms = (time.monotonic() - last_shown_at) * 1000
+            remaining_ms = _RESET_NOTIFICATION_SPACING_MS - elapsed_ms
+            if remaining_ms > 0:
+                self._reset_notification_scheduled = True
+
+                def show_scheduled() -> None:
+                    self._reset_notification_scheduled = False
+                    self._show_next_reset_notification()
+
+                QTimer.singleShot(max(1, int(remaining_ms)), show_scheduled)
+                return
+
+        title, message, url, provider, kind, event_id = queue.pop(0)
+        tray = getattr(self, "_tray", None)
+        if tray is None:
+            log.info(
+                "reset notification skipped provider=%s kind=%s reason=no tray",
+                provider, kind,
+            )
+        elif not QSystemTrayIcon.isSystemTrayAvailable():
+            log.info(
+                "reset notification skipped provider=%s kind=%s reason=tray unavailable",
+                provider, kind,
+            )
+        else:
+            tray.showMessage(
+                title, message, QSystemTrayIcon.MessageIcon.Information
+            )
+            self._last_reset_notification_url = url
+            self._last_reset_notification_shown_at = time.monotonic()
+            log.info(
+                "reset notification shown provider=%s kind=%s event_id=%s",
+                provider, kind, event_id,
+            )
+        self._show_next_reset_notification()
 
     def _on_reset_notification_clicked(self) -> None:
-        url = self._last_reset_notification_url
+        # QSystemTrayIcon.messageClicked has no notification identifier, so an
+        # older notification clicked later opens the URL of the last one shown.
+        url = self.__dict__.get("_last_reset_notification_url")
         if url:
             QDesktopServices.openUrl(QUrl(url))
 

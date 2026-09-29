@@ -93,12 +93,14 @@ def test_settings_dialog_shows_and_saves_antigravity_options(qtbot, monkeypatch)
     index = next(
         i for i in range(dialog.tabs.count()) if dialog.tabs.tabText(i) == "Antigravity"
     )
-    assert dialog.antigravity_cli_path_label.text() == "agy-test"
+    assert dialog.antigravity_cli_path_edit.text() == ""
+    assert dialog.antigravity_cli_path_status.text() == (
+        "Using auto-detected: agy-test"
+    )
     dialog.antigravity_show_gemini_cb.setChecked(False)
     dialog.apply_to(config)
 
     assert config.antigravity.show_gemini is False
     dialog.show_provider("antigravity")
     assert dialog.tabs.currentIndex() == index
-
 

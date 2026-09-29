@@ -21,9 +21,24 @@ _LATCH_ERROR = (
 )
 
 
+def normalize_cli_path(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if (
+        len(normalized) >= 2
+        and normalized[0] == normalized[-1]
+        and normalized[0] in "\"'"
+    ):
+        normalized = normalized[1:-1].strip()
+    normalized = os.path.expandvars(os.path.expanduser(normalized)).strip()
+    return normalized or None
+
+
 def resolve_cli(cli_path: str | None) -> str | None:
-    if cli_path and Path(cli_path).is_file():
-        return cli_path
+    cli_path = normalize_cli_path(cli_path)
+    if cli_path:
+        return cli_path if Path(cli_path).is_file() else None
 
     found = shutil.which("agy")
     if found:
@@ -237,7 +252,14 @@ class AntigravityProvider(Provider):
                     error=self._latched_error[:200],
                 )
 
-            exe = resolve_cli(self._cli_path)
+            configured_path = normalize_cli_path(self._cli_path)
+            if configured_path and not Path(configured_path).is_file():
+                return UsageSnapshot(
+                    provider=self.name,
+                    status=SnapshotStatus.ERROR,
+                    error=f"agy CLI not found at {configured_path}"[:200],
+                )
+            exe = resolve_cli(configured_path)
             if exe is None:
                 return UsageSnapshot(
                     provider=self.name,
