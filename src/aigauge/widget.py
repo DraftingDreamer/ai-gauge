@@ -363,26 +363,35 @@ def _openrouter_compact_text(snapshot: UsageSnapshot) -> tuple[str, str]:
 
 
 def _short_error_reason(error: str | None) -> str:
-    """One-word tag for the most common failure modes, appended to the 'error' label.
-
-    Matches against substrings of the error string returned by providers and the
-    scraper. Falls back to plain "error" when nothing matches.
-    """
+    """Return a concise reason tag for common provider and scraper failures."""
     if not error:
         return "error"
     e = error.lower()
-    if "timeout" in e:
-        return "error · timeout"
+    if "timed out" in e or "timeout" in e:
+        return "timeout"
+    if any(
+        token in e
+        for token in (
+            "connectionerror", "connection error", "network error", "connectex",
+            "dial tcp", "no such host", "name resolution",
+            "err_internet_disconnected", "err_name_not_resolved", "proxyconnect",
+        )
+    ):
+        return "offline"
+    if "agy cli not found" in e:
+        return "agy not found"
+    if "not the agy cli" in e:
+        return "not agy"
     if "failed to load" in e or "load failed" in e:
-        return "error · load failed"
+        return "load failed"
     if "layout" in e:
-        return "error · layout changed"
+        return "layout changed"
     if "extractor returned null" in e or "no data extracted" in e:
-        return "error · no data"
+        return "no data"
+    if "not signed in" in e or "not logged in" in e or "auth" in e:
+        return "signed out"
     if "github" in e or "api" in e:
-        return "error · api"
-    if "not signed in" in e or "auth" in e:
-        return "error · signed out"
+        return "api"
     return "error"
 
 
@@ -1409,11 +1418,11 @@ class _ProviderTile(QFrame):
             if self.provider in ("codex_resets", "claude_resets") and snapshot.metrics:
                 self.dismiss_btn.show()
                 self.open_btn.setVisible(bool(self._reset_open_url(snapshot)))
-            label = (
-                "error · stale"
-                if snapshot.metrics
-                else _short_error_reason(snapshot.error)
-            )
+            reason = _short_error_reason(snapshot.error)
+            if snapshot.metrics:
+                label = f"{reason} · stale" if reason != "error" else "error · stale"
+            else:
+                label = f"error · {reason}" if reason != "error" else "error"
             self.status.setText(
                 f'<a href="details" style="color:#ef4444; text-decoration:none;">{label}</a>'
             )

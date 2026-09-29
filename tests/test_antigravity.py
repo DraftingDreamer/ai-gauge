@@ -163,7 +163,7 @@ def test_decode_output_rejects_non_json_and_finds_final_json_line():
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        (lambda payload: payload.update(status="FAILED"), "status is not SUCCESS"),
+        (lambda payload: payload.update(status="FAILED"), "agy error: FAILED"),
         (
             lambda payload: payload["command"].update(name="other"),
             "command.name is not usage",

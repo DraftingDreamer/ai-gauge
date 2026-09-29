@@ -145,7 +145,8 @@ def test_settings_browse_populates_path(qtbot, monkeypatch, tmp_path):
 )
 def test_settings_path_status_text(qtbot, monkeypatch, tmp_path, configured,
                                   detected, exists, expected):
-    custom = tmp_path / "configured agy.exe"
+    custom_name = "agy.exe" if expected == "Using: {path}" else "configured agy.exe"
+    custom = tmp_path / custom_name
     auto = tmp_path / "auto agy.exe"
     if exists:
         (custom if configured else auto).touch()

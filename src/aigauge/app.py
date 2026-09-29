@@ -194,6 +194,7 @@ def _preserve_error_metrics(
 ) -> UsageSnapshot:
     if (
         snapshot.status == SnapshotStatus.ERROR
+        and not snapshot.raw.get("config_error")
         and not snapshot.metrics
         and previous is not None
         and previous.status in (SnapshotStatus.OK, SnapshotStatus.ERROR)

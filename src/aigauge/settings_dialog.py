@@ -1730,7 +1730,11 @@ class SettingsDialog(QDialog):
         configured_path = normalize_cli_path(self.antigravity_cli_path_edit.text())
         if configured_path:
             if Path(configured_path).is_file():
-                status = f"Using: {configured_path}"
+                status = (
+                    f"Using: {configured_path}"
+                    if Path(configured_path).stem.lower() == "agy"
+                    else f"Not the agy CLI: {configured_path}"
+                )
             else:
                 status = f"Not found: {configured_path}"
         else:

@@ -127,21 +127,27 @@ def _build_snapshot(
     usage = payload.get("usage")
     num_turns = payload.get("num_turns")
     total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
-    if (
+    spent_tokens = (
+        isinstance(num_turns, (int, float)) and num_turns > 0
+    ) or (isinstance(total_tokens, (int, float)) and total_tokens > 0)
+    indeterminate_usage = (
         "command" not in payload
-        or (isinstance(num_turns, (int, float)) and num_turns > 0)
-        or (isinstance(total_tokens, (int, float)) and total_tokens > 0)
-    ):
+        and "num_turns" not in payload
+        and not (isinstance(usage, dict) and "total_tokens" in usage)
+    )
+    if spent_tokens or indeterminate_usage:
         raise RuntimeError(_LATCH_ERROR)
 
     if payload.get("status") != "SUCCESS":
-        raise ValueError("unexpected agy output: status is not SUCCESS")
+        raise ValueError(f"agy error: {payload.get('error', payload.get('status'))}")
     if num_turns != 0:
         raise ValueError("unexpected agy output: num_turns is not 0")
     if not isinstance(usage, dict):
         raise ValueError("unexpected agy output: usage is not an object")
     if total_tokens != 0:
         raise ValueError("unexpected agy output: usage.total_tokens is not 0")
+    if "command" not in payload:
+        raise ValueError("unexpected agy output: command is missing")
     if not isinstance(command, dict):
         raise ValueError("unexpected agy output: command is not an object")
     if command.get("name") != "usage":
@@ -265,6 +271,14 @@ class AntigravityProvider(Provider):
                     provider=self.name,
                     status=SnapshotStatus.ERROR,
                     error=f"agy CLI not found at {configured_path}"[:200],
+                    raw={"config_error": True},
+                )
+            if configured_path and Path(configured_path).stem.lower() != "agy":
+                return UsageSnapshot(
+                    provider=self.name,
+                    status=SnapshotStatus.ERROR,
+                    error=f"Not the agy CLI: {configured_path}"[:200],
+                    raw={"config_error": True},
                 )
             exe = resolve_cli(configured_path)
             if exe is None:
