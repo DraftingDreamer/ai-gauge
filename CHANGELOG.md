@@ -6,6 +6,19 @@
 
 - Removed the obsolete OpenCode browser-session, cookie-paste, and webpage-verification implementation. OpenCode usage now uses only the authenticated Go API introduced in 0.8.4, with a separate API key stored in the system credential store for each configured account. Claude and Codex browser sign-in are unchanged.
 
+### Added
+
+- Added optional Antigravity quota tracking through the local `agy` CLI, plus Codex Resets and Claude Resets announcement tiles and configurable reset alerts.
+- Added native Windows toast notifications for reset announcements, with a system-tray balloon fallback.
+
+### Changed
+
+- Provider tiles now show short refresh-error causes and mark retained values as stale.
+
+### Fixed
+
+- Claude usage-page redirects to sign-in now show a **Sign in** action instead of being treated as a retryable scrape failure. Cherry-picked from [innoscoutpro/ai-gauge](https://github.com/innoscoutpro/ai-gauge/commit/a45e5f06df2af3881aae9427bcfe27310b1b54fe).
+
 ## 0.8.4 - 2026-09-19
 
 ### Changed

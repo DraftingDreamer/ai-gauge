@@ -14,7 +14,7 @@
 </p>
 
 AI Gauge is a compact desktop monitor for **Claude.ai**, **ChatGPT Codex**,
-**OpenCode Go**, **GitHub Copilot**, and **OpenRouter**. It shows usage limits,
+**Antigravity**, **OpenCode Go**, **GitHub Copilot**, and **OpenRouter**. It shows usage limits,
 reset times, balances, and spend at a glance. Optional local tracking estimates
 the API-equivalent cost of Claude Code and Codex activity on this computer.
 
@@ -87,6 +87,7 @@ On first launch the widget appears with enabled provider tiles. Claude and Codex
 | **OpenCode Go**    | Sign in at <https://opencode.ai/auth> and copy an API key. In **Settings → OpenCode**, paste the key beside the subscription name. Each subscription has an independent key and tile. AI Gauge stores keys in the system credential store and reads Rolling, Weekly, and Monthly usage from the authenticated Go API. The shorter name **OpenCode** is used in the app. |
 | **GitHub Copilot** | Create a **fine-grained PAT** at <https://github.com/settings/personal-access-tokens/new>. For personal plans, add **Account permissions → Plan → Read**. Paste into Settings; set your monthly AI credit allowance (Pro=1,500, Pro+=7,000, Max=20,000). If Copilot is billed through an organization, enter the billing org and use a token/account with org billing access and **Organization permissions → Administration → Read**. |
 | **OpenRouter**     | Create an inference API key at <https://openrouter.ai/keys> and paste it into Settings. To show account balance and model activity, also create a management key at <https://openrouter.ai/settings/provisioning-keys>. Management keys cannot be used for inference; AI Gauge stores it separately and only uses it for OpenRouter management endpoints. Daily spend budget is optional.                                                    |
+| **Antigravity**    | In **Settings → General**, enable **Antigravity**. The **Antigravity** tab runs the local `agy` CLI's `/quota` command; no account or API key is entered in AI Gauge. Leave **agy CLI** blank for auto-detection (`agy` on `PATH`, then `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows), or select the executable. A missing file or a file not named `agy` is reported and not run. The tile can show Gemini and Claude+GPT usage, each with 5-hour and weekly limits; choose which group to display in the Antigravity tab. AI Gauge disables `agy` background updates for its own calls and hides its console window; this does not affect updates when you run `agy` yourself. If a response indicates token use, or the result cannot confirm no use, polling stops until AI Gauge is restarted. |
 
 ### Multiple Claude / Codex / OpenCode Go accounts
 
@@ -105,6 +106,28 @@ Enable **Settings → Local usage** to estimate what Claude Code and Codex
 activity on this computer would cost at API prices. AI Gauge stores token
 counts, model names, and timestamps locally; nothing is uploaded and the
 estimates are not charges.
+
+### Optional reset announcements
+
+Both reset tiles are off by default. Enable **Codex Resets** or **Claude Resets**
+in **Settings → General**. These
+third-party trackers are independent of OpenAI and Anthropic, and their AI
+classification can mistake an ambiguous post for a completed reset; open the
+linked original post to confirm. AI Gauge contacts each tracker at most every
+15 minutes after a successful fetch (failed requests may be retried); the sites
+receive your IP address and the
+`ai-gauge/<version> (+https://github.com/DraftingDreamer/ai-gauge)` User-Agent.
+Requests go to `https://codex-resets.com/api/v1/status` and
+`https://claude-resets.com/api/resets`. The tiles show the latest event; ✕ hides
+the tile until another entry arrives. Codex also shows an
+AI-predicted **Watch** row, which is not an official announcement and does not
+trigger notifications. Claude provisional events are marked in the tooltip;
+Claude entries not marked as `reset` (including policy notices) are omitted.
+Choose reset notification
+types in **Settings → Reset alerts**: Codex offers announced, landed, and
+banked-reset alerts; Claude offers landed and banked-reset alerts. The first
+event found after enabling a tracker is recorded without a notification.
+[Data from Codex Resets](https://codex-resets.com) · [Data from Claude Resets](https://claude-resets.com)
 
 Open **Usage details** to compare allowance use with estimated cost, including
 views by model, day, and trend. Browser chats, cloud tasks, other computers,
@@ -183,6 +206,20 @@ should work with the normal **Sign in** button.
   refresh timing, and start-at-login.
 - Auto-refresh runs every 5 minutes while usage is changing, then backs off to
   a maximum of 60 minutes by default.
+- On Windows, reset alerts use native notifications in Notification Center;
+  clicking one opens its original post in your browser, including after AI Gauge
+  exits. Multiple notifications do not wait for a previous notification to be
+  clicked. If native notifications fail, or on non-Windows systems, a system
+  tray balloon is used when a Qt system tray is available. Balloons are spaced
+  at least 8 seconds apart; clicking one opens the last balloon's post.
+  AI Gauge registers its
+  notification name and bundled icon under
+  `HKCU\Software\Classes\AppUserModelId\AloeDesk.AIGauge` (`DisplayName` =
+  `AI Gauge`, `IconUri` = the bundled icon path); you can delete this key after
+  uninstalling.
+- On refresh errors, tiles show the short cause; retained values are marked
+  `<cause> · stale` (for example, `offline · stale` or `timeout · stale`), and
+  errors without retained values show `error · <cause>`.
 
 ## Build a standalone binary
 
@@ -249,6 +286,8 @@ the issue templates to use.
 
 ## Notes / limitations
 
+- Antigravity and reset-announcement tiles have no percentage and are omitted
+  from the macOS menu-bar summary.
 - **Why does Sign in open a separate Chrome-family window?** Google blocks OAuth in embedded user-agents, while Chrome's App-Bound Encryption prevents AI Gauge from reading an existing everyday browser profile. AI Gauge therefore opens a fresh temporary browser profile, receives only the selected provider's cookies through Chrome's loopback debugging interface, imports them into the app, and deletes the temporary profile.
 - **Claude / Codex layouts may change.** If a browser-backed provider tile shows "error" after an upstream UI update, its page-extractor JS under `src/aigauge/providers/` may need adjusting — the rest of the app keeps working.
 - **Remote desktops and GPU-less sessions need one caveat.** The gauge is plain Qt Widgets and runs anywhere, including over RDP/XRDP and on machines with no GPU. Claude and Codex are read by driving an embedded Chromium, which needs an OpenGL context; a session offering neither GLX nor EGL cannot provide one. In that case those tiles report that they need a browser, while OpenCode Go, GitHub Copilot, and OpenRouter use API credentials and work normally. Most Linux desktops supply software GL through Mesa, so this only bites on bare X servers and some remote sessions. If AI Gauge misjudges your session, set `AIGAUGE_FORCE_WEBENGINE=1` to skip the check.
