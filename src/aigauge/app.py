@@ -147,9 +147,19 @@ def _snapshot_signature(snapshot: UsageSnapshot) -> tuple:
             snapshot.status.value,
             snapshot.error,
             raw.get("event_key"),
-            bool(raw.get("dismissed", False)),
+            raw.get("event_summary"),
+            raw.get("event_detail"),
+            bool(raw.get("provisional", False)),
+            bool(raw.get("event_has_url", raw.get("event_url"))),
+            bool(raw.get("event_dismissed", raw.get("dismissed", False))),
             raw.get("watch_key"),
             raw.get("watch_level"),
+            raw.get("watch_chance"),
+            raw.get("watch_forecast_window"),
+            raw.get("watch_text"),
+            raw.get("watch_observed_at"),
+            raw.get("watch_expires_at"),
+            bool(raw.get("watch_has_url", raw.get("watch_url"))),
             bool(raw.get("watch_dismissed", False)),
         )
     return (
@@ -206,7 +216,8 @@ def _preserve_error_metrics(
     previous: UsageSnapshot | None,
 ) -> UsageSnapshot:
     if (
-        snapshot.status == SnapshotStatus.ERROR
+        snapshot.provider not in RESET_ANNOUNCEMENT_PROVIDERS
+        and snapshot.status == SnapshotStatus.ERROR
         and not snapshot.raw.get("config_error")
         and not snapshot.metrics
         and previous is not None
@@ -801,16 +812,15 @@ class App(QObject):
         product = "Codex" if name == "codex_resets" else "Claude"
         if event.kind == "announced":
             title = f"{product} reset announced"
-            message = f"A {event.summary} was announced. Click to open the post."
+            message = f"A {event.summary} was announced."
         elif event.kind == "landed":
             title = f"{product} reset landed"
-            message = "Usage limits were refilled. Click to open the post."
+            message = "Usage limits were refilled."
         else:
             title = f"{product} reset credit granted"
-            message = (
-                f"A banked reset is available to redeem in {product}. "
-                "Click to open the post."
-            )
+            message = f"A banked reset is available to redeem in {product}."
+        if event.url is not None:
+            message += " Click to open the post."
         self._enqueue_reset_notification(
             title, message, event.url, name, event.kind, event.id
         )

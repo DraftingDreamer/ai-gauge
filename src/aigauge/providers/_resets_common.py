@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from abc import abstractmethod
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 import math
 from urllib.parse import urlsplit
 from typing import Callable
@@ -24,6 +25,7 @@ class _ResetsState:
     etag: str | None = None
     last_success_at: datetime | None = None
     next_allowed_at: datetime = datetime.min.replace(tzinfo=timezone.utc)
+    last_error: str | None = None
 
 
 _PROCESS_STATES: dict[str, _ResetsState] = {}
@@ -165,15 +167,33 @@ def build_snapshot(
         raw={
             "event_key": event.key if event is not None else None,
             "event_kind": event.kind if event is not None else None,
+            "event_summary": event.summary if event is not None else None,
+            "event_detail": event.detail if event is not None else None,
             "event_url": event.url if event is not None else None,
+            "event_has_url": bool(event is not None and event.url),
             "provisional": event.provisional if event is not None else False,
+            "event_dismissed": event_dismissed,
             "dismissed": dismissed,
-            **({
-                "watch_key": active_watch.key if active_watch is not None else None,
-                "watch_level": active_watch.level if active_watch is not None else None,
-                "watch_url": active_watch.source_url if active_watch is not None else None,
-                "watch_dismissed": watch_dismissed,
-            } if watch is not None else {}),
+            "watch_key": active_watch.key if active_watch is not None else None,
+            "watch_level": active_watch.level if active_watch is not None else None,
+            "watch_chance": (
+                active_watch.reset_chance_percent if active_watch is not None else None
+            ),
+            "watch_forecast_window": (
+                active_watch.forecast_window if active_watch is not None else None
+            ),
+            "watch_text": active_watch.text if active_watch is not None else None,
+            "watch_observed_at": (
+                active_watch.observed_at.astimezone(timezone.utc).isoformat()
+                if active_watch is not None else None
+            ),
+            "watch_expires_at": (
+                active_watch.expires_at.astimezone(timezone.utc).isoformat()
+                if active_watch is not None else None
+            ),
+            "watch_url": active_watch.source_url if active_watch is not None else None,
+            "watch_has_url": bool(active_watch is not None and active_watch.source_url),
+            "watch_dismissed": watch_dismissed,
         },
     )
 
@@ -230,11 +250,28 @@ class ResetsProviderBase(Provider):
     def _next_allowed_at(self, value: datetime) -> None:
         self._state.next_allowed_at = value
 
+    @property
+    def _last_error(self) -> str | None:
+        return self._state.last_error
+
+    @_last_error.setter
+    def _last_error(self, value: str | None) -> None:
+        self._state.last_error = value
+
     def _defer_after_failure(self, retry_after: str | None = None) -> None:
         try:
             seconds = float(retry_after) if retry_after is not None else 0
         except (TypeError, ValueError):
-            seconds = 0
+            try:
+                retry_at = parsedate_to_datetime(retry_after) if retry_after else None
+                if retry_at is not None:
+                    if retry_at.tzinfo is None or retry_at.utcoffset() is None:
+                        retry_at = retry_at.replace(tzinfo=timezone.utc)
+                    seconds = (retry_at.astimezone(timezone.utc) - self._clock()).total_seconds()
+                else:
+                    seconds = 0
+            except (TypeError, ValueError, OverflowError):
+                seconds = 0
         if not math.isfinite(seconds):
             seconds = 0
         seconds = max(0, seconds)
@@ -296,6 +333,7 @@ class ResetsProviderBase(Provider):
             ):
                 return build_snapshot(
                     self.name, self.latest_event, self.dismissed_event_key, now,
+                    error=self._last_error,
                     watch=self.latest_watch,
                     dismissed_watch_key=self.dismissed_watch_key,
                 )
@@ -305,12 +343,13 @@ class ResetsProviderBase(Provider):
                 event = self._fetch_latest_event()
             except Exception as exc:  # noqa: BLE001
                 self._defer_after_failure(self._pending_retry_after)
+                self._last_error = str(exc)[:200]
                 return build_snapshot(
                     self.name,
                     self.latest_event,
                     self.dismissed_event_key,
                     now,
-                    error=str(exc)[:200],
+                    error=self._last_error,
                     watch=self.latest_watch,
                     dismissed_watch_key=self.dismissed_watch_key,
                 )
@@ -318,6 +357,7 @@ class ResetsProviderBase(Provider):
                 self._etag = self._pending_etag
             self.latest_event = event
             self._last_success_at = now
+            self._last_error = None
             return build_snapshot(
                 self.name, self.latest_event, self.dismissed_event_key, now,
                 watch=self.latest_watch,

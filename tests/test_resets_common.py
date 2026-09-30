@@ -41,10 +41,16 @@ def test_build_snapshot_formats_plain_text_row_and_safe_raw_data():
     assert metric.window is None
     assert metric.reset_label is None
     assert metric.note == event.detail
-    assert event.detail not in str(snapshot.raw)
+    assert snapshot.raw["event_detail"] == event.detail
     assert snapshot.raw == {
         "event_key": "landed:event-1", "event_kind": "landed",
-        "event_url": event.url, "provisional": False, "dismissed": False,
+        "event_summary": event.summary, "event_detail": event.detail,
+        "event_url": event.url, "event_has_url": True,
+        "provisional": False, "event_dismissed": False, "dismissed": False,
+        "watch_key": None, "watch_level": None, "watch_chance": None,
+        "watch_forecast_window": None, "watch_text": None,
+        "watch_observed_at": None, "watch_expires_at": None,
+        "watch_url": None, "watch_has_url": False, "watch_dismissed": False,
     }
     assert snapshot.fetched_at == NOW.astimezone().replace(tzinfo=None)
     assert snapshot.fetched_at.tzinfo is None
@@ -178,3 +184,62 @@ def test_invalid_payload_does_not_commit_new_etag(monkeypatch):
     provider.refresh(snapshots.append)
     assert "If-None-Match" not in responses.calls[1].request.headers
     assert provider._etag == '"valid-payload"'
+
+
+def test_failed_refresh_stays_error_during_cooldown_and_clears_after_success(monkeypatch):
+    class _CooldownProvider(ResetsProviderBase):
+        name = "test_error_cooldown_persistence"
+        display_name = "Cooldown"
+
+        def _fetch_latest_event(self):
+            calls[0] += 1
+            if calls[0] == 2:
+                raise RuntimeError("temporary failure")
+            return _event()
+
+    current = [NOW]
+    calls = [0]
+    provider = _CooldownProvider(clock=lambda: current[0])
+    monkeypatch.setattr(provider, "_run_async", lambda work, done: done(work()))
+    snapshots = []
+
+    provider.refresh(snapshots.append)
+    assert snapshots[-1].status == SnapshotStatus.OK
+    current[0] += provider.MIN_INTERVAL
+    provider.refresh(snapshots.append)
+    assert snapshots[-1].status == SnapshotStatus.ERROR
+    assert snapshots[-1].error == "temporary failure"
+
+    current[0] += timedelta(minutes=1)
+    rebuilt = _CooldownProvider(clock=lambda: current[0])
+    monkeypatch.setattr(rebuilt, "_run_async", lambda work, done: done(work()))
+    rebuilt.refresh(snapshots.append)
+    assert snapshots[-1].status == SnapshotStatus.ERROR
+    assert snapshots[-1].error == "temporary failure"
+    assert snapshots[-1].metrics[0].note == _event().detail
+    assert calls[0] == 2
+
+    current[0] += provider.MIN_INTERVAL - timedelta(minutes=1)
+    rebuilt.refresh(snapshots.append)
+    assert snapshots[-1].status == SnapshotStatus.OK
+    assert snapshots[-1].error is None
+    assert calls[0] == 3
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [
+        ("Wed, 30 Sep 2026 13:00:00 GMT", timedelta(hours=1)),
+        ("Wed, 30 Sep 2026 12:01:00 GMT", timedelta(minutes=15)),
+        ("Wed, 30 Sep 2026 11:00:00 GMT", timedelta(minutes=15)),
+        ("not an HTTP date", timedelta(minutes=15)),
+        (None, timedelta(minutes=15)),
+        ("0", timedelta(minutes=15)),
+        ("-1", timedelta(minutes=15)),
+    ],
+)
+def test_retry_after_http_date_uses_minimum_backoff(retry_after, expected_delay):
+    current = datetime(2026, 9, 30, 12, tzinfo=timezone.utc)
+    provider = _FakeResetsProvider(clock=lambda: current)
+    provider._defer_after_failure(retry_after)
+    assert provider._next_allowed_at == current + expected_delay

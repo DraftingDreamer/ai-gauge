@@ -282,3 +282,34 @@ def test_missing_or_unavailable_tray_does_not_raise(monkeypatch):
     providers["claude_resets"].latest_event = event("landed", "two", "claude")
     app._on_reset_event("claude_resets")
     tray.showMessage.assert_not_called()
+
+
+def test_notification_messages_omit_open_post_hint_without_url(monkeypatch):
+    expected = {
+        "announced": (
+            "Codex reset announced",
+            "A regular reset was announced.",
+        ),
+        "landed": (
+            "Codex reset landed",
+            "Usage limits were refilled.",
+        ),
+        "banked": (
+            "Codex reset credit granted",
+            "A banked reset is available to redeem in Codex.",
+        ),
+    }
+    app, providers, _ = make_app(monkeypatch, tray=Mock())
+    enqueue = Mock()
+    app._enqueue_reset_notification = enqueue
+
+    for kind, (title, message) in expected.items():
+        for url in ("https://example.test/post", None):
+            providers["codex_resets"].latest_event = ResetEvent(
+                kind, f"{kind}-{bool(url)}", NOW, "regular reset", "detail", url
+            )
+            app._on_reset_event("codex_resets")
+            complete_message = message + (
+                " Click to open the post." if url is not None else ""
+            )
+            assert enqueue.call_args.args[:3] == (title, complete_message, url)

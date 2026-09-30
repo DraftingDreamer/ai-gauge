@@ -498,7 +498,7 @@ def test_save_failure_does_not_break_snapshot_or_notification(monkeypatch, caplo
     assert "codex_resets" not in app._inflight
     app._enqueue_reset_notification.assert_called_once_with(
         "Codex reset landed",
-        "Usage limits were refilled. Click to open the post.",
+        "Usage limits were refilled.",
         None, "codex_resets", "landed", "new",
     )
     assert "failed to save reset event" in caplog.text
@@ -614,3 +614,77 @@ def _provider_app(config):
     )
     app._sync_usage_cache = lambda: None
     return app
+
+
+def test_reset_signature_tracks_display_content_and_watch_expiry():
+    original = ResetEvent("landed", "same", NOW, "old summary", "detail", None)
+    base = build_snapshot("codex_resets", original, None, NOW)
+    corrected = ResetEvent("landed", "same", NOW, "new summary", "detail", None)
+    assert _snapshot_signature(base) != _snapshot_signature(
+        build_snapshot("codex_resets", corrected, None, NOW)
+    )
+
+    watch_40 = _watch()
+    watch_90 = ResetWatch(
+        watch_40.level, 90, watch_40.forecast_window, watch_40.observed_at,
+        watch_40.expires_at, watch_40.text, watch_40.source_url,
+    )
+    with_watch = build_snapshot("codex_resets", None, None, NOW, watch=watch_40)
+    changed_chance = build_snapshot("codex_resets", None, None, NOW, watch=watch_90)
+    expired_watch = build_snapshot(
+        "codex_resets", None, None, watch_40.expires_at, watch=watch_40
+    )
+    assert _snapshot_signature(with_watch) != _snapshot_signature(changed_chance)
+    assert _snapshot_signature(with_watch) != _snapshot_signature(expired_watch)
+
+
+@pytest.mark.parametrize("case", ["expired_watch", "dismissed_event", "claude"])
+def test_on_snapshot_does_not_restore_reset_metrics_after_error(case, monkeypatch):
+    app = App.__new__(App)
+    app._config = Config()
+    app._config.mcp_enabled = False
+    app._cleared_sessions = set()
+    app._snapshots = {}
+    app._cycle_signatures = {}
+    app._inflight = set()
+    app._refresh_queue = []
+    app._current_refresh_manual = True
+    app._history = SimpleNamespace(record_snapshot=lambda snapshot: [])
+    app._ratio = SimpleNamespace(
+        record_snapshot=Mock(), display_estimate=Mock(return_value=None),
+        current_estimate=Mock(return_value=None),
+    )
+    app._widget = SimpleNamespace(
+        update_snapshot=Mock(), set_ratio=Mock(), set_refreshing=Mock(),
+    )
+    app._ratio_recent = Mock(return_value=[])
+    app._local_usage_on_snapshot = Mock()
+    app._cycle_changed = Mock(return_value=False)
+    app._update_tray = Mock()
+    app._schedule_next_refresh = Mock()
+    monkeypatch.setattr(app_module.QTimer, "singleShot", Mock())
+
+    if case == "expired_watch":
+        watch = _watch()
+        previous = build_snapshot("codex_resets", None, None, NOW, watch=watch)
+        failed = build_snapshot(
+            "codex_resets", None, None, watch.expires_at, error="HTTP 503",
+            watch=watch,
+        )
+        expected_metrics = []
+    elif case == "dismissed_event":
+        post = event()
+        previous = build_snapshot("codex_resets", post, None, NOW)
+        failed = build_snapshot(
+            "codex_resets", post, post.key, NOW, error="HTTP 503"
+        )
+        expected_metrics = []
+    else:
+        stale = UsageMetric("stale Claude metric", None, None, None, None, None, None)
+        previous = UsageSnapshot("claude", SnapshotStatus.OK, metrics=[stale])
+        failed = UsageSnapshot("claude", SnapshotStatus.ERROR, metrics=[])
+        expected_metrics = [stale]
+
+    app._snapshots[previous.provider] = previous
+    app._on_snapshot(failed)
+    assert app._snapshots[failed.provider].metrics == expected_metrics
