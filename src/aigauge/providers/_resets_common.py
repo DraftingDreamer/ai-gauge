@@ -166,6 +166,10 @@ def build_snapshot(
         error=error,
         raw={
             "event_key": event.key if event is not None else None,
+            "event_at": (
+                event.at.astimezone(timezone.utc).isoformat()
+                if event is not None else None
+            ),
             "event_kind": event.kind if event is not None else None,
             "event_summary": event.summary if event is not None else None,
             "event_detail": event.detail if event is not None else None,

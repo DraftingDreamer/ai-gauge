@@ -147,10 +147,11 @@ def _snapshot_signature(snapshot: UsageSnapshot) -> tuple:
             snapshot.status.value,
             snapshot.error,
             raw.get("event_key"),
+            raw.get("event_at"),
             raw.get("event_summary"),
             raw.get("event_detail"),
             bool(raw.get("provisional", False)),
-            bool(raw.get("event_has_url", raw.get("event_url"))),
+            raw.get("event_url"),
             bool(raw.get("event_dismissed", raw.get("dismissed", False))),
             raw.get("watch_key"),
             raw.get("watch_level"),
@@ -159,7 +160,7 @@ def _snapshot_signature(snapshot: UsageSnapshot) -> tuple:
             raw.get("watch_text"),
             raw.get("watch_observed_at"),
             raw.get("watch_expires_at"),
-            bool(raw.get("watch_has_url", raw.get("watch_url"))),
+            raw.get("watch_url"),
             bool(raw.get("watch_dismissed", False)),
         )
     return (

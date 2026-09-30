@@ -44,6 +44,7 @@ def test_build_snapshot_formats_plain_text_row_and_safe_raw_data():
     assert snapshot.raw["event_detail"] == event.detail
     assert snapshot.raw == {
         "event_key": "landed:event-1", "event_kind": "landed",
+        "event_at": event.at.astimezone(timezone.utc).isoformat(),
         "event_summary": event.summary, "event_detail": event.detail,
         "event_url": event.url, "event_has_url": True,
         "provisional": False, "event_dismissed": False, "dismissed": False,

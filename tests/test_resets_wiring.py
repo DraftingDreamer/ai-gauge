@@ -688,3 +688,46 @@ def test_on_snapshot_does_not_restore_reset_metrics_after_error(case, monkeypatc
     app._snapshots[previous.provider] = previous
     app._on_snapshot(failed)
     assert app._snapshots[failed.provider].metrics == expected_metrics
+
+
+def test_reset_signature_tracks_event_absolute_time():
+    original = ResetEvent("landed", "same", NOW, "summary", "detail", None)
+    corrected = ResetEvent(
+        "landed", "same", NOW + timedelta(minutes=1), "summary", "detail", None
+    )
+    original_snapshot = build_snapshot("codex_resets", original, None, NOW)
+    corrected_snapshot = build_snapshot("codex_resets", corrected, None, NOW)
+
+    assert _snapshot_signature(original_snapshot) != _snapshot_signature(
+        corrected_snapshot
+    )
+
+
+def test_reset_signature_tracks_event_url_value():
+    common = ("landed", "same", NOW, "summary", "detail")
+    original = ResetEvent(*common, "https://x.example/a")
+    corrected = ResetEvent(*common, "https://x.example/b")
+    original_snapshot = build_snapshot("codex_resets", original, None, NOW)
+    corrected_snapshot = build_snapshot("codex_resets", corrected, None, NOW)
+
+    assert _snapshot_signature(original_snapshot) != _snapshot_signature(
+        corrected_snapshot
+    )
+
+
+def test_reset_signature_tracks_watch_url_value():
+    base = _watch()
+    original = ResetWatch(
+        base.level, base.reset_chance_percent, base.forecast_window,
+        base.observed_at, base.expires_at, base.text, "https://x.example/a",
+    )
+    corrected = ResetWatch(
+        base.level, base.reset_chance_percent, base.forecast_window,
+        base.observed_at, base.expires_at, base.text, "https://x.example/b",
+    )
+    original_snapshot = build_snapshot("codex_resets", None, None, NOW, watch=original)
+    corrected_snapshot = build_snapshot("codex_resets", None, None, NOW, watch=corrected)
+
+    assert _snapshot_signature(original_snapshot) != _snapshot_signature(
+        corrected_snapshot
+    )
