@@ -26,7 +26,7 @@ AI Gauge is a local desktop utility for monitoring AI service usage across Claud
 - Floating widget on Windows/Linux, compact pill mode, tray/menu actions, no-tray Linux fallback, and native macOS menu-bar popover.
 - Provider tiles for Claude, Codex, Antigravity, OpenCode, GitHub Copilot, and OpenRouter; optional Codex Resets and Claude Resets announcement tiles.
 - Antigravity usage from the local `agy` CLI `/quota` command, with Gemini and Claude+GPT 5-hour and weekly limits; it is disabled by default and configurable under General and Antigravity Settings.
-- Optional reset trackers, disabled by default, queried at most every 15 minutes; Codex includes an AI forecast row, and Claude provisional events are identified in tooltips.
+- Optional reset trackers, disabled by default, queried no more than once every 15 minutes, including after failures; longer tracker-requested waits are honored. Codex includes an AI forecast row, and Claude provisional events are identified in tooltips. Tracker links are opened only when they use HTTP or HTTPS.
 - Claude usage scraping from `https://claude.ai/new#settings/usage`, including session and weekly limits.
 - Codex usage scraping from `https://chatgpt.com/codex/cloud/settings/analytics#personal-usage`, including the weekly limit and the five-hour Session limit whenever Codex exposes it.
 - OpenCode usage scraping from its configurable workspace Go page, including Rolling, Weekly, and Monthly limits.
@@ -70,6 +70,7 @@ AI Gauge is a local desktop utility for monitoring AI service usage across Claud
 - Copilot's current usage-based model is tracked as AI credits rather than premium request counts; annual/request-based accounts may still rely on GitHub's legacy premium-request API fallback.
 - OpenRouter activity uses the last 30 completed UTC days and excludes the current UTC day; balance and model activity require a management key.
 - Reset trackers are third-party and unaffiliated with OpenAI or Anthropic. Their AI classifications can be wrong; users should open the linked original post to verify. Reset tiles have no percentage and are omitted from the macOS menu-bar summary.
+- Antigravity usage, reset tiles, and native notifications have been tested on Windows 11 only; macOS and Linux are untested.
 - Antigravity calls use `AGY_CLI_DISABLE_AUTO_UPDATE=true` and stop polling for the rest of the app process if token use is detected or cannot be ruled out; restart AI Gauge to resume.
 - Same-user local processes can generally decrypt/access stored session tokens or keys through the OS credential model; do not imply process-level isolation.
 - No implemented collaboration, alerting, cloud sync, mobile app, browser extension, team dashboard, or export workflow was found.

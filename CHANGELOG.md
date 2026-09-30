@@ -8,8 +8,8 @@
 
 ### Added
 
-- Added optional Antigravity quota tracking through the local `agy` CLI, plus Codex Resets and Claude Resets announcement tiles and configurable reset alerts.
-- Added native Windows toast notifications for reset announcements, with a system-tray balloon fallback.
+- Optional Antigravity quota tracking reads from the local `agy` CLI; Codex Resets and Claude Resets announcement tiles and configurable reset alerts are available.
+- Native Windows toast notifications show reset announcements, with a system-tray balloon fallback.
 
 ### Changed
 
@@ -17,7 +17,7 @@
 
 ### Fixed
 
-- Claude usage-page redirects to sign-in now show a **Sign in** action instead of being treated as a retryable scrape failure. Cherry-picked from [innoscoutpro/ai-gauge](https://github.com/innoscoutpro/ai-gauge/commit/a45e5f06df2af3881aae9427bcfe27310b1b54fe).
+- Claude usage-page auth redirects now show a **Sign in** action instead of being treated as a retryable scrape failure, and the sign-in title is recognized. Cherry-picked from [innoscoutpro/ai-gauge report auth redirects](https://github.com/innoscoutpro/ai-gauge/commit/b91170ab6e38a4037eda744e13b4ea8ae00d96a1) and [innoscoutpro/ai-gauge recognize the sign-in title](https://github.com/innoscoutpro/ai-gauge/commit/a45e5f06df2af3881aae9427bcfe27310b1b54fe).
 
 ## 0.8.4 - 2026-09-19
 
