@@ -73,7 +73,7 @@ AI Gauge is a local desktop utility for monitoring AI service usage across Claud
 - Antigravity usage, reset tiles, and native notifications have been tested on Windows 11 only; macOS and Linux are untested.
 - Antigravity calls use `AGY_CLI_DISABLE_AUTO_UPDATE=true` and stop polling for the rest of the app process if token use is detected or cannot be ruled out; restart AI Gauge to resume.
 - Same-user local processes can generally decrypt/access stored session tokens or keys through the OS credential model; do not imply process-level isolation.
-- No implemented collaboration, alerting, cloud sync, mobile app, browser extension, team dashboard, or export workflow was found.
+- The only notifications are optional reset-announcement alerts; usage-threshold alerts, collaboration, cloud sync, mobile apps, browser extensions, team dashboards, and export workflows are not implemented.
 
 ## Suggested Positioning Angles
 

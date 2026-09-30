@@ -215,6 +215,9 @@ should work with the normal **Sign in** button.
   notifications fail, or on non-Windows systems, a system
   tray balloon is used when a Qt system tray is available. Balloons are spaced
   at least 8 seconds apart; clicking one opens the last balloon's post.
+  Reset notifications are not shown in macOS menu-bar mode or on Linux
+  without a system tray. Reset tiles still update in the macOS popover and the
+  tray-less Linux floating widget.
   If balloon tips are turned off in Windows, the fallback balloons are not
   shown.
   AI Gauge registers its
