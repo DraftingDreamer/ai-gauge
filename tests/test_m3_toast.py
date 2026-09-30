@@ -206,9 +206,8 @@ def test_app_windows_toast_succeeds_without_tray(monkeypatch, caplog):
         "landed", "newer", app_module.datetime.now(app_module.timezone.utc),
         "regular reset", "Private post content", "https://example.test/newer",
     )
-    monkeypatch.setattr(app_module.time, "monotonic", lambda: 100.0)
-    app._last_reset_notification_shown_at = 0.0
     app._on_reset_event("codex_resets")
+    assert show.call_args_list[-1].args[2] == "https://example.test/newer"
     assert show.call_count == 2
 
 

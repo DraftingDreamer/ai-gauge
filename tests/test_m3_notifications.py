@@ -5,6 +5,7 @@ from unittest.mock import Mock
 from PyQt6.QtWidgets import QSystemTrayIcon
 
 from aigauge import app as app_module
+from aigauge import windows_toast
 from aigauge.app import App
 from aigauge.config import Config
 from aigauge.providers._resets_common import ResetEvent
@@ -86,6 +87,112 @@ def test_two_providers_are_queued_and_last_shown_url_is_opened(monkeypatch):
     )
     app._on_reset_notification_clicked()
     assert opened.call_args.args[0].toString() == app._last_reset_notification_url
+
+
+def test_two_windows_toasts_are_sent_immediately_without_tray_queue(
+    monkeypatch, caplog,
+):
+    show_toast = Mock(return_value=True)
+    monkeypatch.setattr(windows_toast, "show_toast", show_toast)
+    tray = Mock()
+    app, providers, _ = make_app(monkeypatch, tray=tray)
+    monkeypatch.setattr(app_module, "sys", SimpleNamespace(platform="win32"))
+    clock = Mock(return_value=100.0)
+    monkeypatch.setattr(app_module.time, "monotonic", clock)
+    single_shot = Mock()
+    monkeypatch.setattr(app_module.QTimer, "singleShot", single_shot)
+    caplog.set_level("INFO", logger="aigauge.app")
+
+    providers["codex_resets"].latest_event = event("landed", "codex", "codex")
+    providers["claude_resets"].latest_event = event("landed", "claude", "claude")
+    app._on_reset_event("codex_resets")
+    app._on_reset_event("claude_resets")
+
+    assert [call.args[2] for call in show_toast.call_args_list] == [
+        "https://example.test/codex/codex/landed",
+        "https://example.test/claude/claude/landed",
+    ]
+    assert show_toast.call_count == 2
+    assert caplog.text.count("via=toast") == 2
+    single_shot.assert_not_called()
+    clock.assert_not_called()
+    tray.showMessage.assert_not_called()
+
+
+def test_toast_success_does_not_delay_following_tray_fallback(monkeypatch):
+    show_toast = Mock(side_effect=[True, False])
+    monkeypatch.setattr(windows_toast, "show_toast", show_toast)
+    tray = Mock()
+    app, providers, _ = make_app(monkeypatch, tray=tray)
+    monkeypatch.setattr(app_module, "sys", SimpleNamespace(platform="win32"))
+    single_shot = Mock()
+    monkeypatch.setattr(app_module.QTimer, "singleShot", single_shot)
+
+    providers["codex_resets"].latest_event = event("landed", "toast", "codex")
+    providers["claude_resets"].latest_event = event("landed", "tray", "claude")
+    app._on_reset_event("codex_resets")
+    app._on_reset_event("claude_resets")
+
+    assert show_toast.call_count == 2
+    tray.showMessage.assert_called_once()
+    assert app._last_reset_notification_url == (
+        "https://example.test/claude/tray/landed"
+    )
+    single_shot.assert_not_called()
+
+
+def test_tray_spacing_does_not_delay_following_successful_toast(monkeypatch):
+    tray = Mock()
+    app, providers, _ = make_app(monkeypatch, tray=tray)
+    clock = [50.0]
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
+    single_shot = Mock()
+    monkeypatch.setattr(app_module.QTimer, "singleShot", single_shot)
+    providers["codex_resets"].latest_event = event("landed", "tray", "codex")
+    app._on_reset_event("codex_resets")
+    tray.showMessage.assert_called_once()
+
+    monkeypatch.setattr(app_module, "sys", SimpleNamespace(platform="win32"))
+    show_toast = Mock(return_value=True)
+    monkeypatch.setattr(windows_toast, "show_toast", show_toast)
+    providers["claude_resets"].latest_event = event("landed", "toast", "claude")
+    app._on_reset_event("claude_resets")
+
+    show_toast.assert_called_once_with(
+        "Claude reset landed", "Usage limits were refilled. Click to open the post.",
+        "https://example.test/claude/toast/landed",
+    )
+    single_shot.assert_not_called()
+    tray.showMessage.assert_called_once()
+
+
+def test_failed_toast_is_not_retried_when_queued_tray_notice_is_shown(monkeypatch):
+    tray = Mock()
+    app, providers, _ = make_app(monkeypatch, tray=tray)
+    clock = [100.0]
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
+    timers = []
+    monkeypatch.setattr(
+        app_module.QTimer, "singleShot", lambda delay, callback: timers.append(
+            (delay, callback)
+        )
+    )
+    providers["codex_resets"].latest_event = event("landed", "first", "codex")
+    app._on_reset_event("codex_resets")
+
+    monkeypatch.setattr(app_module, "sys", SimpleNamespace(platform="win32"))
+    show_toast = Mock(return_value=False)
+    monkeypatch.setattr(windows_toast, "show_toast", show_toast)
+    providers["claude_resets"].latest_event = event("landed", "second", "claude")
+    app._on_reset_event("claude_resets")
+    assert show_toast.call_count == 1
+    assert len(timers) == 1
+    assert timers[0][0] == app_module._RESET_NOTIFICATION_SPACING_MS
+
+    clock[0] += app_module._RESET_NOTIFICATION_SPACING_MS / 1000
+    timers.pop()[1]()
+    assert show_toast.call_count == 1
+    assert tray.showMessage.call_count == 2
 
 
 def test_notification_logging_records_shown_without_post_content(

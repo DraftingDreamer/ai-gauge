@@ -83,6 +83,8 @@ _ACTIVE_MODE_MINUTES = 30
 _STALE_ERROR_RETRY_MINUTES = 1
 _HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000
 _LOG_VALUE_LIMIT = 300
+# Only tray notifications need spacing: messageClicked has no ID.
+# Protocol toasts carry their own URL.
 _RESET_NOTIFICATION_SPACING_MS = 8000
 
 
@@ -803,6 +805,17 @@ class App(QObject):
         kind: str,
         event_id: str,
     ) -> None:
+        if sys.platform == "win32":
+            from . import windows_toast
+
+            # Protocol activation carries each URL, so toasts bypass the tray queue.
+            if windows_toast.show_toast(title, message, url):
+                log.info(
+                    "reset notification shown provider=%s kind=%s event_id=%s via=toast",
+                    provider, kind, event_id,
+                )
+                return
+
         queue = self.__dict__.get("_reset_notification_queue")
         if queue is None:
             queue = []
@@ -829,18 +842,6 @@ class App(QObject):
                 return
 
         title, message, url, provider, kind, event_id = queue.pop(0)
-        if sys.platform == "win32":
-            from . import windows_toast
-
-            if windows_toast.show_toast(title, message, url):
-                self._last_reset_notification_shown_at = time.monotonic()
-                log.info(
-                    "reset notification shown provider=%s kind=%s event_id=%s via=toast",
-                    provider, kind, event_id,
-                )
-                self._show_next_reset_notification()
-                return
-
         tray = getattr(self, "_tray", None)
         if tray is None:
             log.info(
