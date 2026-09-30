@@ -20,6 +20,7 @@ _LATCH_ERROR = (
     "spending model quota. Update agy and restart AI Gauge."
 )
 _AGY_ENV_OVERRIDES = {"AGY_CLI_DISABLE_AUTO_UPDATE": "true"}
+_PROCESS_LATCHED_ERROR: str | None = None
 # agy's background updater can open an unhidden console on Windows; the value
 # must be "true" ("1" is ignored). This only affects AI Gauge quota calls,
 # leaving auto-updates enabled when users run agy themselves.
@@ -245,6 +246,15 @@ class AntigravityProvider(Provider):
     name = "antigravity"
     display_name = "Antigravity"
 
+    @property
+    def _latched_error(self) -> str | None:
+        return _PROCESS_LATCHED_ERROR
+
+    @_latched_error.setter
+    def _latched_error(self, value: str | None) -> None:
+        global _PROCESS_LATCHED_ERROR
+        _PROCESS_LATCHED_ERROR = value
+
     def __init__(
         self,
         cli_path: str | None = None,
@@ -254,15 +264,15 @@ class AntigravityProvider(Provider):
         self._cli_path = cli_path
         self._show_gemini = show_gemini
         self._show_third_party = show_third_party
-        self._latched_error: str | None = None
 
     def refresh(self, on_done: Callable[[UsageSnapshot], None]) -> None:
         def work() -> UsageSnapshot:
-            if self._latched_error:
+            global _PROCESS_LATCHED_ERROR
+            if _PROCESS_LATCHED_ERROR:
                 return UsageSnapshot(
                     provider=self.name,
                     status=SnapshotStatus.ERROR,
-                    error=self._latched_error[:200],
+                    error=_PROCESS_LATCHED_ERROR[:200],
                 )
 
             configured_path = normalize_cli_path(self._cli_path)
@@ -311,11 +321,11 @@ class AntigravityProvider(Provider):
                     show_third_party=self._show_third_party,
                 )
             except RuntimeError as exc:
-                self._latched_error = str(exc)[:200]
+                _PROCESS_LATCHED_ERROR = str(exc)[:200]
                 return UsageSnapshot(
                     provider=self.name,
                     status=SnapshotStatus.ERROR,
-                    error=self._latched_error,
+                    error=_PROCESS_LATCHED_ERROR,
                 )
             except (TypeError, ValueError) as exc:
                 return UsageSnapshot(

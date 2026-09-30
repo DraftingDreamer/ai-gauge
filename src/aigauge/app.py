@@ -47,7 +47,7 @@ from .providers.openrouter import OpenRouterProvider
 from .providers.antigravity import AntigravityProvider
 from .providers.claude_resets import ClaudeResetsProvider
 from .providers.codex_resets import CodexResetsProvider
-from .providers._resets_common import build_snapshot
+from .providers._resets_common import RESET_ANNOUNCEMENT_PROVIDERS, build_snapshot
 from .providers.opencode_go import OpenCodeGoProvider
 from .ratio import RatioStore, sessions_per_week
 from .ratio_dialog import RatioHistoryDialog
@@ -141,6 +141,17 @@ def _adaptive_refresh_minutes(
 
 
 def _snapshot_signature(snapshot: UsageSnapshot) -> tuple:
+    if snapshot.provider in RESET_ANNOUNCEMENT_PROVIDERS:
+        raw = snapshot.raw or {}
+        return (
+            snapshot.status.value,
+            snapshot.error,
+            raw.get("event_key"),
+            bool(raw.get("dismissed", False)),
+            raw.get("watch_key"),
+            raw.get("watch_level"),
+            bool(raw.get("watch_dismissed", False)),
+        )
     return (
         snapshot.status.value,
         snapshot.error,
@@ -594,8 +605,10 @@ class App(QObject):
     def _stale_error_retry_time(self, now: datetime | None = None) -> datetime | None:
         """Soonest recovery refresh for errors that still have stale metrics."""
         if not any(
-            snap.status == SnapshotStatus.ERROR and bool(snap.metrics)
-            for snap in self._snapshots.values()
+            name not in RESET_ANNOUNCEMENT_PROVIDERS
+            and snap.status == SnapshotStatus.ERROR
+            and bool(snap.metrics)
+            for name, snap in self._snapshots.items()
         ):
             return None
         return (now or datetime.now()) + timedelta(minutes=_STALE_ERROR_RETRY_MINUTES)
@@ -688,8 +701,11 @@ class App(QObject):
             self._snapshots.get(snapshot.provider),
         )
         self._snapshots[snapshot.provider] = snapshot
-        if snapshot.provider in ("codex_resets", "claude_resets"):
-            self._on_reset_event(snapshot.provider)
+        if snapshot.provider in RESET_ANNOUNCEMENT_PROVIDERS:
+            try:
+                self._on_reset_event(snapshot.provider)
+            except Exception:  # noqa: BLE001
+                log.exception("reset event hook failed provider=%s", snapshot.provider)
         if getattr(self._config, "mcp_enabled", False):
             self._sync_usage_cache()
         self._cycle_signatures[snapshot.provider] = _snapshot_signature(snapshot)
@@ -765,7 +781,10 @@ class App(QObject):
         )
         first_event = settings.last_event_key is None
         settings.last_event_key = event.key
-        self._config.save()
+        try:
+            self._config.save()
+        except Exception:  # noqa: BLE001
+            log.exception("failed to save reset event provider=%s", name)
         if first_event:
             log.info(
                 "reset notification skipped provider=%s reason=first run, recorded without notification",
@@ -890,7 +909,10 @@ class App(QObject):
         if watch is not None:
             settings.dismissed_watch_key = watch.key
             provider.dismissed_watch_key = watch.key
-        self._config.save()
+        try:
+            self._config.save()
+        except Exception:  # noqa: BLE001
+            log.exception("failed to save reset dismissal provider=%s", name)
         snapshot = build_snapshot(
             provider.name, provider.latest_event, provider.dismissed_event_key,
             now,

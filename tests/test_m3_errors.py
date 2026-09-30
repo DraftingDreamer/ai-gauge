@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from aigauge.app import _preserve_error_metrics
 from aigauge.config import Config
 from aigauge.models import SnapshotStatus, UsageMetric, UsageSnapshot
@@ -54,26 +56,26 @@ def test_offline_eligibility_error_does_not_latch(monkeypatch, tmp_path):
     assert provider._latched_error is None
 
 
-def test_token_usage_latches_and_stops_future_calls(monkeypatch, tmp_path):
-    for usage_change in ({"num_turns": 1}, {"total_tokens": 1}):
-        payload = {
-            "status": "SUCCESS",
-            "num_turns": 0,
-            "usage": {"total_tokens": 0},
-            "command": {"name": "usage", "data": {"groups": []}},
-        }
-        payload.update({k: v for k, v in usage_change.items() if k == "num_turns"})
-        if "total_tokens" in usage_change:
-            payload["usage"]["total_tokens"] = usage_change["total_tokens"]
-        provider, calls = _provider_for_payload(monkeypatch, tmp_path, payload)
-        snapshots = []
+@pytest.mark.parametrize("usage_change", [{"num_turns": 1}, {"total_tokens": 1}])
+def test_token_usage_latches_and_stops_future_calls(monkeypatch, tmp_path, usage_change):
+    payload = {
+        "status": "SUCCESS",
+        "num_turns": 0,
+        "usage": {"total_tokens": 0},
+        "command": {"name": "usage", "data": {"groups": []}},
+    }
+    payload.update({k: v for k, v in usage_change.items() if k == "num_turns"})
+    if "total_tokens" in usage_change:
+        payload["usage"]["total_tokens"] = usage_change["total_tokens"]
+    provider, calls = _provider_for_payload(monkeypatch, tmp_path, payload)
+    snapshots = []
 
-        provider.refresh(snapshots.append)
-        provider.refresh(snapshots.append)
+    provider.refresh(snapshots.append)
+    provider.refresh(snapshots.append)
 
-        assert len(calls) == 1
-        assert snapshots[0].error == snapshots[1].error
-        assert provider._latched_error
+    assert len(calls) == 1
+    assert snapshots[0].error == snapshots[1].error
+    assert provider._latched_error
 
 
 def test_indeterminate_usage_latches(monkeypatch, tmp_path):

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from abc import abstractmethod
 from datetime import datetime, timedelta, timezone
+import math
+from urllib.parse import urlsplit
 from typing import Callable
 
 import requests
@@ -10,6 +12,31 @@ import requests
 from .. import __version__
 from ..models import SnapshotStatus, UsageMetric, UsageSnapshot
 from .base import Provider
+
+
+RESET_ANNOUNCEMENT_PROVIDERS = frozenset({"codex_resets", "claude_resets"})
+
+
+@dataclass
+class _ResetsState:
+    latest_event: ResetEvent | None = None
+    latest_watch: ResetWatch | None = None
+    etag: str | None = None
+    last_success_at: datetime | None = None
+    next_allowed_at: datetime = datetime.min.replace(tzinfo=timezone.utc)
+
+
+_PROCESS_STATES: dict[str, _ResetsState] = {}
+
+
+def _valid_http_url(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    return value if parsed.scheme.lower() in {"http", "https"} and parsed.netloc else None
 
 
 @dataclass(frozen=True)
@@ -28,6 +55,7 @@ class ResetEvent:
         if self.at.tzinfo is None or self.at.utcoffset() is None:
             raise ValueError("event time must be timezone-aware")
         object.__setattr__(self, "at", self.at.astimezone(timezone.utc))
+        object.__setattr__(self, "url", _valid_http_url(self.url))
 
     @property
     def key(self) -> str:
@@ -142,6 +170,7 @@ def build_snapshot(
             "dismissed": dismissed,
             **({
                 "watch_key": active_watch.key if active_watch is not None else None,
+                "watch_level": active_watch.level if active_watch is not None else None,
                 "watch_url": active_watch.source_url if active_watch is not None else None,
                 "watch_dismissed": watch_dismissed,
             } if watch is not None else {}),
@@ -156,12 +185,61 @@ class ResetsProviderBase(Provider):
     def __init__(self, clock: Callable[[], datetime] | None = None):
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.dismissed_event_key: str | None = None
-        self.latest_event: ResetEvent | None = None
-        self.latest_watch: ResetWatch | None = None
         self.dismissed_watch_key: str | None = None
-        self._etag: str | None = None
-        self._last_success_at: datetime | None = None
-        self._next_allowed_at = datetime.min.replace(tzinfo=timezone.utc)
+        self._state = _PROCESS_STATES.setdefault(self.name, _ResetsState())
+        self._pending_etag: str | None = None
+        self._pending_retry_after: str | None = None
+
+    @property
+    def latest_event(self) -> ResetEvent | None:
+        return self._state.latest_event
+
+    @latest_event.setter
+    def latest_event(self, value: ResetEvent | None) -> None:
+        self._state.latest_event = value
+
+    @property
+    def latest_watch(self) -> ResetWatch | None:
+        return self._state.latest_watch
+
+    @latest_watch.setter
+    def latest_watch(self, value: ResetWatch | None) -> None:
+        self._state.latest_watch = value
+
+    @property
+    def _etag(self) -> str | None:
+        return self._state.etag
+
+    @_etag.setter
+    def _etag(self, value: str | None) -> None:
+        self._state.etag = value
+
+    @property
+    def _last_success_at(self) -> datetime | None:
+        return self._state.last_success_at
+
+    @_last_success_at.setter
+    def _last_success_at(self, value: datetime | None) -> None:
+        self._state.last_success_at = value
+
+    @property
+    def _next_allowed_at(self) -> datetime:
+        return self._state.next_allowed_at
+
+    @_next_allowed_at.setter
+    def _next_allowed_at(self, value: datetime) -> None:
+        self._state.next_allowed_at = value
+
+    def _defer_after_failure(self, retry_after: str | None = None) -> None:
+        try:
+            seconds = float(retry_after) if retry_after is not None else 0
+        except (TypeError, ValueError):
+            seconds = 0
+        if not math.isfinite(seconds):
+            seconds = 0
+        seconds = max(0, seconds)
+        delay = max(self.MIN_INTERVAL.total_seconds(), seconds)
+        self._next_allowed_at = self._clock() + timedelta(seconds=delay)
 
     def _get_json(self, url: str, use_etag: bool) -> dict | None:
         headers = {
@@ -175,34 +253,33 @@ class ResetsProviderBase(Provider):
         try:
             response = requests.get(url, headers=headers, timeout=self.TIMEOUT_S)
         except requests.RequestException as exc:
+            self._defer_after_failure()
             raise ResetsFetchError(
                 f"network error: {type(exc).__name__}"
             ) from exc
 
+        self._pending_retry_after = response.headers.get("Retry-After")
         if response.status_code == 304:
             return None
         if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After")
-            try:
-                seconds = float(retry_after) if retry_after is not None else None
-            except ValueError:
-                seconds = None
-            if seconds is None or seconds < 0:
-                seconds = self.MIN_INTERVAL.total_seconds()
-            self._next_allowed_at = self._clock() + timedelta(seconds=seconds)
+            self._defer_after_failure(self._pending_retry_after)
             raise ResetsFetchError("rate limited")
         if not 200 <= response.status_code < 300:
+            self._defer_after_failure(self._pending_retry_after)
             raise ResetsFetchError(f"HTTP {response.status_code}")
         if response.status_code != 200:
+            self._defer_after_failure(self._pending_retry_after)
             raise ResetsFetchError(f"HTTP {response.status_code}")
 
         if use_etag and response.headers.get("ETag"):
-            self._etag = response.headers["ETag"]
+            self._pending_etag = response.headers["ETag"]
         try:
             payload = response.json()
         except ValueError as exc:
+            self._defer_after_failure(self._pending_retry_after)
             raise ResetsFetchError("invalid JSON") from exc
         if not isinstance(payload, dict):
+            self._defer_after_failure(self._pending_retry_after)
             raise ResetsFetchError("unexpected payload")
         return payload
 
@@ -222,9 +299,12 @@ class ResetsProviderBase(Provider):
                     watch=self.latest_watch,
                     dismissed_watch_key=self.dismissed_watch_key,
                 )
+            self._pending_etag = None
+            self._pending_retry_after = None
             try:
                 event = self._fetch_latest_event()
-            except (ResetsFetchError, KeyError, TypeError, ValueError) as exc:
+            except Exception as exc:  # noqa: BLE001
+                self._defer_after_failure(self._pending_retry_after)
                 return build_snapshot(
                     self.name,
                     self.latest_event,
@@ -234,6 +314,8 @@ class ResetsProviderBase(Provider):
                     watch=self.latest_watch,
                     dismissed_watch_key=self.dismissed_watch_key,
                 )
+            if self._pending_etag is not None:
+                self._etag = self._pending_etag
             self.latest_event = event
             self._last_success_at = now
             return build_snapshot(

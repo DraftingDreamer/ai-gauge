@@ -9,6 +9,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from aigauge import windows_toast
+from aigauge.providers import _resets_common, antigravity
 
 
 def pytest_configure(config):
@@ -32,3 +33,13 @@ def isolated_appdata(tmp_path, monkeypatch):
     """Redirect %APPDATA% so config writes never touch the user's real folder."""
     monkeypatch.setenv("APPDATA", str(tmp_path))
     yield
+
+
+@pytest.fixture(autouse=True)
+def reset_process_provider_state():
+    """Keep module-level provider state isolated between tests."""
+    _resets_common._PROCESS_STATES.clear()
+    antigravity._PROCESS_LATCHED_ERROR = None
+    yield
+    _resets_common._PROCESS_STATES.clear()
+    antigravity._PROCESS_LATCHED_ERROR = None

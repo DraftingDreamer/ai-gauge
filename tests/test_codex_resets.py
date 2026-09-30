@@ -116,14 +116,14 @@ def test_rate_limit_retains_event_and_blocks_until_retry_after(monkeypatch):
     provider._last_success_at = NOW - provider.MIN_INTERVAL
     _sync(provider, monkeypatch)
     responses.add(responses.GET, CODEX_RESETS_URL, status=429,
-                  headers={"Retry-After": "30"})
+                  headers={"Retry-After": "0"})
     responses.add(responses.GET, CODEX_RESETS_URL, json=_fixture(), status=200)
     snapshots = []
     provider.refresh(snapshots.append)
     assert snapshots[-1].status == SnapshotStatus.ERROR
     assert snapshots[-1].error == "rate limited"
     assert snapshots[-1].metrics[0].note == "cached detail"
-    current[0] += timedelta(seconds=29)
+    current[0] += timedelta(minutes=14, seconds=59)
     provider.refresh(snapshots.append)
     assert len(responses.calls) == 1
     current[0] += timedelta(seconds=1)

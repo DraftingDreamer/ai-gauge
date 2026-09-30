@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import html
 import math
 import re
 import sys
@@ -798,6 +799,7 @@ class _MetricRow(QWidget):
         note: str | None = None,
         window: timedelta | None = None,
         elide_value: bool = False,
+        plain_text: bool = False,
     ) -> None:
         # Reset to flexible width; group alignment in _set_rows may pin it after.
         self.label.setMinimumWidth(MIN_LABEL_WIDTH)
@@ -819,9 +821,15 @@ class _MetricRow(QWidget):
         else:
             self.label.setText(label)
             self.reset.setStyleSheet("color: #9ca3af; font-size: 10px;")
+        text_format = (
+            Qt.TextFormat.PlainText if plain_text else Qt.TextFormat.AutoText
+        )
+        self.label.setTextFormat(text_format)
+        self.reset.setTextFormat(text_format)
         label_width = self.label.fontMetrics().horizontalAdvance(self.label.text()) + 4
         self.label.setMinimumWidth(max(MIN_LABEL_WIDTH, label_width))
-        self.setToolTip(note or "")
+        tooltip = html.escape(note or "", quote=True) if plain_text else note or ""
+        self.setToolTip(tooltip)
         self._resets_at = resets_at
         self._window = window
         self.refresh_pace()
@@ -1647,6 +1655,7 @@ class _ProviderTile(QFrame):
             row.set_metric(
                 label, pct, reset, reset_label, note, window,
                 elide_value=self.provider == "codex_resets" and label.startswith("Watch · "),
+                plain_text=self.provider in {"codex_resets", "claude_resets"},
             )
         self._normalize_gauge_columns()
         row_width = self._row_available_width()
