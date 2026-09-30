@@ -233,18 +233,6 @@ def test_notification_logging_records_first_run(monkeypatch, caplog):
     assert "provider=codex_resets reason=first run, recorded without notification" in caplog.text
 
 
-def test_first_event_is_recorded_without_notification_and_duplicates_are_ignored(
-    monkeypatch,
-):
-    tray = Mock()
-    app, providers, saves = make_app(monkeypatch, tray=tray)
-    app._config.codex_resets.last_event_key = None
-    providers["codex_resets"].latest_event = event("landed", "new", "codex")
-    app._on_reset_event("codex_resets")
-    app._on_reset_event("codex_resets")
-    assert app._config.codex_resets.last_event_key == "landed:new"
-    saves.assert_called_once_with()
-    tray.showMessage.assert_not_called()
 
 
 def test_same_id_announced_then_landed_queues_two_notifications(monkeypatch):

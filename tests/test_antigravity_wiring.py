@@ -1,4 +1,5 @@
-﻿from types import SimpleNamespace
+import pytest
+from types import SimpleNamespace
 
 from aigauge import app as app_module
 from aigauge import config as config_module
@@ -104,3 +105,83 @@ def test_settings_dialog_shows_and_saves_antigravity_options(qtbot, monkeypatch)
     dialog.show_provider("antigravity")
     assert dialog.tabs.currentIndex() == index
 
+
+from PyQt6.QtWidgets import QFileDialog
+from aigauge.config import Config
+
+def _dialog(qtbot, monkeypatch, config=None, autodetected=None):
+    monkeypatch.setattr(
+        "aigauge.settings_dialog.resolve_cli", lambda _: autodetected
+    )
+    monkeypatch.setattr("aigauge.settings_dialog.set_start_at_login", lambda _: None)
+    monkeypatch.setattr(Config, "save", lambda self: None)
+    dialog = SettingsDialog(config or Config())
+    qtbot.addWidget(dialog)
+    return dialog
+
+def test_settings_path_field_loads_saves_normalized_path_and_empty_as_none(
+    qtbot, monkeypatch, tmp_path
+):
+    path = tmp_path / "agy.exe"
+    config = Config()
+    config.antigravity.cli_path = f'  "{path}"  '
+    dialog = _dialog(qtbot, monkeypatch, config)
+    assert dialog.antigravity_cli_path_edit.text() == f'  "{path}"  '
+    dialog.apply_to(config)
+    assert config.antigravity.cli_path == str(path)
+    dialog.antigravity_cli_path_edit.clear()
+    dialog.apply_to(config)
+    assert config.antigravity.cli_path is None
+
+def test_settings_browse_populates_path(qtbot, monkeypatch, tmp_path):
+    dialog = _dialog(qtbot, monkeypatch)
+    selected = tmp_path / "agy.exe"
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", lambda *args: (str(selected), "")
+    )
+    dialog.antigravity_cli_browse_button.click()
+    assert dialog.antigravity_cli_path_edit.text() == str(selected)
+
+@pytest.mark.parametrize(
+    ("configured", "detected", "exists", "expected"),
+    [
+        ("custom", None, True, "Using: {path}"),
+        ("custom", None, False, "Not found: {path}"),
+        ("", "auto", True, "Using auto-detected: {path}"),
+        (
+            "", None, False,
+            "agy CLI not found. Install the Antigravity CLI or set its path.",
+        ),
+    ],
+)
+def test_settings_path_status_text(qtbot, monkeypatch, tmp_path, configured,
+                                  detected, exists, expected):
+    custom_name = "agy.exe" if expected == "Using: {path}" else "configured agy.exe"
+    custom = tmp_path / custom_name
+    auto = tmp_path / "auto agy.exe"
+    if exists:
+        (custom if configured else auto).touch()
+    config = Config()
+    config.antigravity.cli_path = str(custom) if configured else None
+    dialog = _dialog(
+        qtbot, monkeypatch, config, autodetected=str(auto) if detected else None
+    )
+    if not configured:
+        dialog.antigravity_cli_path_edit.clear()
+    path = custom if configured else auto
+    expected_text = expected.format(path=path)
+    assert dialog.antigravity_cli_path_status.text() == expected_text
+
+def test_settings_identifies_wrong_cli_name(qtbot, monkeypatch, tmp_path):
+    executable = tmp_path / "notepad.exe"
+    executable.touch()
+    monkeypatch.setattr("aigauge.settings_dialog.resolve_cli", lambda _: None)
+    monkeypatch.setattr("aigauge.settings_dialog.set_start_at_login", lambda _: None)
+    config = Config()
+    config.antigravity.cli_path = str(executable)
+    dialog = SettingsDialog(config)
+    qtbot.addWidget(dialog)
+
+    assert dialog.antigravity_cli_path_status.text() == (
+        f"Not the agy CLI: {executable}"
+    )

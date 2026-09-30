@@ -11,7 +11,7 @@ from aigauge import widget as widget_module
 from aigauge.app import App, _enabled_providers
 from aigauge.config import Config, ResetsConfig, display_name_for_account
 from aigauge.menubar import status_items
-from aigauge.models import SnapshotStatus, UsageSnapshot
+from aigauge.models import SnapshotStatus, UsageMetric, UsageSnapshot
 from aigauge.providers._resets_common import ResetEvent, build_snapshot
 from aigauge.settings_dialog import SettingsDialog
 from aigauge.widget import UsageWidget
@@ -363,3 +363,254 @@ def test_menubar_excludes_reset_providers():
     config = Config()
     providers = ("claude", "codex_resets", "claude_resets")
     assert len(status_items({}, providers, config)) == 1
+
+
+import html
+import json
+import logging
+import subprocess
+from pathlib import Path
+from xml.etree import ElementTree
+from aigauge.app import _snapshot_signature
+from aigauge.providers import _resets_common, antigravity
+from aigauge.providers._resets_common import ResetWatch, ResetsProviderBase
+from aigauge.providers.antigravity import AntigravityProvider
+from aigauge.providers.claude_resets import ClaudeResetsProvider
+from aigauge.providers.codex_resets import CodexResetsProvider, _parse_watch
+from aigauge.windows_toast import build_toast_xml
+
+def _fixture(name):
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+def _watch(level="elevated", observed=NOW):
+    return ResetWatch(level, 40, "1-2 days", observed, NOW + timedelta(days=1), "watch text", None)
+
+@pytest.mark.parametrize("provider_type,fixture,feed", [
+    (CodexResetsProvider, "codex_status.json", "codex"),
+    (ClaudeResetsProvider, "claude_resets.json", "claude"),
+])
+def test_feed_parsers_and_toast_drop_invalid_event_url(provider_type, fixture, feed, monkeypatch):
+    payload = _fixture(fixture)
+    bad = "ms-msdt:/id PCWDiagnostic"
+    if feed == "codex":
+        payload["data"]["scheduled_reset"] = None
+        payload["data"]["latest_reset"]["source"]["url"] = bad
+        provider = provider_type()
+        provider._get_json = lambda url, use_etag: payload
+        event = provider._fetch_latest_event()
+    else:
+        reset = payload["providers"]["claude"]["events"][2]
+        reset["url"] = bad
+        provider = provider_type()
+        provider._get_json = lambda url, use_etag: payload
+        event = provider._fetch_latest_event()
+    assert event.url is None
+    root = ElementTree.fromstring(build_toast_xml("title", "message", event.url))
+    assert "launch" not in root.attrib
+    app = App.__new__(App)
+    app._last_reset_notification_url = event.url
+    opened = Mock()
+    monkeypatch.setattr(app_module.QDesktopServices, "openUrl", opened)
+    app._on_reset_notification_clicked()
+    opened.assert_not_called()
+
+def test_reset_signatures_ignore_relative_age_but_track_event_dismissal_and_watch():
+    event = ResetEvent("landed", "1", NOW, "summary", "detail", None)
+    five = build_snapshot("codex_resets", event, None, NOW + timedelta(minutes=5))
+    ten = build_snapshot("codex_resets", event, None, NOW + timedelta(minutes=10))
+    assert _snapshot_signature(five) == _snapshot_signature(ten)
+    newer = ResetEvent("landed", "2", NOW, "summary", "detail", None)
+    assert _snapshot_signature(five) != _snapshot_signature(
+        build_snapshot("codex_resets", newer, None, NOW + timedelta(minutes=10))
+    )
+    assert _snapshot_signature(five) != _snapshot_signature(
+        build_snapshot("codex_resets", event, event.key, NOW + timedelta(minutes=10))
+    )
+    watch_snapshot = build_snapshot("codex_resets", event, None, NOW, watch=_watch())
+    changed_watch = build_snapshot("codex_resets", event, None, NOW, watch=_watch("strong"))
+    assert _snapshot_signature(watch_snapshot) != _snapshot_signature(changed_watch)
+
+def test_stale_error_retry_skips_only_reset_providers():
+    app = App.__new__(App)
+    metric = UsageMetric("stale", None, None, None, None, None, None)
+    app._snapshots = {
+        "codex_resets": UsageSnapshot("codex_resets", SnapshotStatus.ERROR, metrics=[metric]),
+        "claude_resets": UsageSnapshot("claude_resets", SnapshotStatus.ERROR, metrics=[metric]),
+    }
+    assert app._stale_error_retry_time(NOW.replace(tzinfo=None)) is None
+    app._snapshots["claude"] = UsageSnapshot("claude", SnapshotStatus.ERROR, metrics=[metric])
+    assert app._stale_error_retry_time(NOW.replace(tzinfo=None)) == NOW.replace(tzinfo=None) + timedelta(minutes=1)
+
+def test_reset_fetch_state_survives_provider_rebuild(monkeypatch):
+    config = Config()
+    config.providers.claude = config.providers.codex = False
+    config.providers.copilot = config.providers.openrouter = False
+    config.providers.codex_resets = True
+    app = _provider_app(config)
+    fetch = Mock()
+
+    def fetch_event(provider):
+        fetch(provider)
+        provider.latest_watch = _watch()
+        provider._pending_etag = '"reset-state"'
+        fetch.return_value = ResetEvent("landed", "new", NOW, "summary", "detail", None)
+        return fetch.return_value
+
+    monkeypatch.setattr(CodexResetsProvider, "_fetch_latest_event", fetch_event)
+    monkeypatch.setattr(ResetsProviderBase, "_run_async", lambda self, work, done: done(work()))
+    monkeypatch.setattr(app_module, "datetime", SimpleNamespace(now=lambda: NOW.replace(tzinfo=None)))
+    app._build_providers()
+    app._providers["codex_resets"].refresh(lambda snapshot: None)
+    app._build_providers()
+    rebuilt = app._providers["codex_resets"]
+    assert rebuilt.latest_event.id == "new"
+    assert rebuilt.latest_watch.key == _watch().key
+    assert rebuilt._etag == '"reset-state"'
+    app._providers["codex_resets"].refresh(lambda snapshot: None)
+    fetch.assert_called_once()
+
+def test_save_failure_does_not_break_snapshot_or_notification(monkeypatch, caplog):
+    config = Config()
+    config.codex_resets.last_event_key = "landed:old"
+    config.codex_resets.notify_landed = True
+    monkeypatch.setattr(Config, "save", Mock(side_effect=OSError("disk full")))
+    event = ResetEvent("landed", "new", NOW, "summary", "detail", "ms-msdt:/id PCWDiagnostic")
+    provider = SimpleNamespace(latest_event=event, name="codex_resets")
+    app = App.__new__(App)
+    app._config = config
+    app._providers = {"codex_resets": provider}
+    app._snapshots = {}
+    app._cleared_sessions = set()
+    app._cycle_signatures = {}
+    app._inflight = {"codex_resets"}
+    app._refresh_queue = ["next"]
+    app._history = SimpleNamespace(record_snapshot=lambda snapshot: [])
+    app._ratio = SimpleNamespace(record_snapshot=Mock(), display_estimate=Mock(return_value=None), current_estimate=Mock(return_value=None))
+    app._widget = SimpleNamespace(update_snapshot=Mock(), set_ratio=Mock())
+    app._local_usage_on_snapshot = Mock()
+    app._ratio_recent = Mock(return_value=[])
+    app._start_next_refresh = Mock()
+    app._enqueue_reset_notification = Mock()
+    monkeypatch.setattr(app_module.QTimer, "singleShot", Mock())
+    snapshot = build_snapshot("codex_resets", event, None, NOW)
+    with caplog.at_level(logging.ERROR):
+        app._on_snapshot(snapshot)
+    assert "codex_resets" not in app._inflight
+    app._enqueue_reset_notification.assert_called_once_with(
+        "Codex reset landed",
+        "Usage limits were refilled. Click to open the post.",
+        None, "codex_resets", "landed", "new",
+    )
+    assert "failed to save reset event" in caplog.text
+
+def test_dismiss_save_failure_is_logged_and_still_hides_event(monkeypatch, caplog):
+    config = Config()
+    monkeypatch.setattr(Config, "save", Mock(side_effect=OSError("disk full")))
+    provider = SimpleNamespace(
+        name="codex_resets", latest_event=ResetEvent("landed", "1", NOW, "summary", "detail", None),
+        latest_watch=None, dismissed_event_key=None, dismissed_watch_key=None,
+    )
+    app = App.__new__(App)
+    app._config = config
+    app._providers = {"codex_resets": provider}
+    app._snapshots = {}
+    app._widget = SimpleNamespace(update_snapshot=Mock())
+    with caplog.at_level(logging.ERROR):
+        app._on_dismiss_requested("codex_resets")
+    assert app._snapshots["codex_resets"].metrics == []
+    assert "failed to save reset dismissal" in caplog.text
+
+def test_dismiss_event_and_watch_without_fetch(qtbot, monkeypatch):
+    config = Config()
+    save = Mock()
+    monkeypatch.setattr(Config, "save", save)
+    widget = UsageWidget(config)
+    qtbot.addWidget(widget)
+    watch = _parse_watch(watch_payload())
+    provider = SimpleNamespace(
+        name="codex_resets", latest_event=event(), latest_watch=watch,
+        dismissed_event_key=None, dismissed_watch_key=None,
+        _fetch_latest_event=Mock(),
+    )
+    app = App.__new__(App)
+    app._config = config
+    app._providers = {"codex_resets": provider}
+    app._snapshots = {}
+    app._widget = widget
+    widget.update_snapshot(build_snapshot("codex_resets", event(), None, NOW, watch=watch), "Codex Resets")
+    app._on_dismiss_requested("codex_resets")
+    assert config.codex_resets.dismissed_event_key == event().key
+    assert config.codex_resets.dismissed_watch_key == watch.key
+    assert widget._tiles["codex_resets"].isHidden()
+    provider._fetch_latest_event.assert_not_called()
+    save.assert_called_once()
+    same = _parse_watch(watch_payload(
+        reset_chance_percent=55, forecast_window="slightly different text"
+    ))
+    snapshot = build_snapshot("codex_resets", event(), event().key, NOW,
+                              watch=same, dismissed_watch_key=watch.key)
+    assert snapshot.raw["dismissed"]
+    promoted = _parse_watch(watch_payload(level="strong"))
+    snapshot = build_snapshot("codex_resets", event(), event().key, NOW,
+                              watch=promoted, dismissed_watch_key=watch.key)
+    assert not snapshot.raw["dismissed"]
+    widget.update_snapshot(snapshot, "Codex Resets")
+    assert not widget._tiles["codex_resets"].isHidden()
+    changed = _parse_watch(watch_payload(observed_at="2026-09-27T11:05:00Z"))
+    assert not build_snapshot("codex_resets", event(), event().key, NOW,
+                              watch=changed, dismissed_watch_key=watch.key).raw["dismissed"]
+    assert build_snapshot("codex_resets", event(), event().key, NOW,
+                          watch=watch, dismissed_watch_key=promoted.key).raw["dismissed"]
+
+def test_expired_watch_is_not_saved_on_event_dismiss(monkeypatch):
+    config = Config()
+    monkeypatch.setattr(Config, "save", Mock())
+    expired = _parse_watch(watch_payload(expires_at="2026-09-26T11:00:00Z"))
+    provider = SimpleNamespace(
+        name="codex_resets", latest_event=event(), latest_watch=expired,
+        dismissed_event_key=None, dismissed_watch_key=None,
+    )
+    app = App.__new__(App)
+    app._config = config
+    app._providers = {"codex_resets": provider}
+    app._snapshots = {}
+    app._widget = SimpleNamespace(update_snapshot=Mock())
+    app._on_dismiss_requested("codex_resets")
+    assert config.codex_resets.dismissed_event_key == event().key
+    assert config.codex_resets.dismissed_watch_key is None
+
+def test_legacy_config_without_watch_key_loads(tmp_path, monkeypatch):
+    from aigauge import config as config_module
+
+    path = tmp_path / "config.json"
+    path.write_text('{"codex_resets":{"dismissed_event_key":"landed:old"}}', encoding="utf-8")
+    monkeypatch.setattr(config_module, "config_path", lambda: path)
+    config = Config.load()
+    assert config.codex_resets.dismissed_watch_key is None
+
+FIXTURES = Path(__file__).parent / "fixtures" / "resets"
+
+def watch_payload(source=None, **changes):
+    payload = {
+        "level": "elevated",
+        "reset_chance_percent": 37,
+        "forecast_window": "later this week",
+        "observed_at": "2026-09-27T11:00:00Z",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+        "text": "Synthetic activity suggests a possible reset.",
+        "source": source if source is not None else {"type": "observed"},
+    }
+    payload.update(changes)
+    return payload
+
+def _provider_app(config):
+    app = App.__new__(App)
+    app._config = config
+    app._providers = {}
+    app._snapshots = {}
+    app._widget = SimpleNamespace(
+        _tiles={}, ensure_tile=lambda name, label: app._widget._tiles.setdefault(name, label),
+        remove_tile=lambda name: app._widget._tiles.pop(name, None),
+    )
+    app._sync_usage_cache = lambda: None
+    return app

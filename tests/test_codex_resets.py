@@ -158,3 +158,79 @@ def test_http_failures_keep_cached_event(monkeypatch, failure):
         "network": "network error: ConnectionError",
         "invalid_json": "invalid JSON",
     }[failure]
+
+
+from types import SimpleNamespace
+from unittest.mock import Mock
+from aigauge.app import App
+from aigauge.config import Config
+from aigauge.providers.codex_resets import _parse_watch
+from aigauge.providers._resets_common import ResetsFetchError
+
+def watch_payload(source=None, **changes):
+    payload = {
+        "level": "elevated",
+        "reset_chance_percent": 37,
+        "forecast_window": "later this week",
+        "observed_at": "2026-09-27T11:00:00Z",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+        "text": "Synthetic activity suggests a possible reset.",
+        "source": source if source is not None else {"type": "observed"},
+    }
+    payload.update(changes)
+    return payload
+
+@pytest.mark.parametrize("source", [
+    {"type": "observed"},
+    {"type": "x_post", "author": "thsottiaux", "url": "https://example.test/post"},
+])
+def test_watch_parse_source_variants_and_invalid_watch_keeps_event(source):
+    parsed = _parse_watch(watch_payload(source))
+    assert parsed is not None
+    assert parsed.source_url == source.get("url")
+    provider = CodexResetsProvider(clock=lambda: NOW)
+    provider._get_json = Mock(return_value={"data": {
+        "latest_reset": {
+            "id": "synthetic", "reset_type": "regular",
+            "announced_at": "2026-09-27T12:00:00Z", "text": "Synthetic event",
+            "source": {"type": "observed"},
+        },
+        "scheduled_reset": None,
+        "active_watch": {"level": "strong"},
+    }})
+    assert provider._fetch_latest_event().id == "synthetic"
+    assert provider.latest_watch is None
+
+@pytest.mark.parametrize("changes", [
+    {"reset_chance_percent": 101},
+    {"reset_chance_percent": True},
+    {"expires_at": "invalid"},
+    {"observed_at": "2026-09-27T11:00:00"},
+    {"source": {"type": "x_post", "url": "https://example.test/post"}},
+])
+def test_invalid_watch_fields_are_ignored(changes):
+    assert _parse_watch(watch_payload(**changes)) is None
+
+def test_watch_cache_on_304_and_error_and_no_notification(monkeypatch):
+    provider = CodexResetsProvider(clock=lambda: NOW)
+    payload = {"data": {
+        "latest_reset": None, "scheduled_reset": None,
+        "active_watch": watch_payload(),
+    }}
+    provider._get_json = Mock(side_effect=[payload, None, ResetsFetchError("HTTP 503")])
+    monkeypatch.setattr(provider, "_run_async", lambda work, done: done(work()))
+    snapshots = []
+    for _ in range(3):
+        provider._last_success_at = NOW - provider.MIN_INTERVAL
+        provider.refresh(snapshots.append)
+    assert [s.status for s in snapshots] == [
+        SnapshotStatus.OK, SnapshotStatus.OK, SnapshotStatus.ERROR,
+    ]
+    assert all(s.raw["watch_key"] == snapshots[0].raw["watch_key"] for s in snapshots)
+    app = App.__new__(App)
+    app._providers = {"codex_resets": provider}
+    app._config = Config()
+    app._tray = SimpleNamespace(showMessage=Mock())
+    app._on_reset_event("codex_resets")
+    assert app._config.codex_resets.last_event_key is None
+    app._tray.showMessage.assert_not_called()

@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timedelta, timezone
 
 from aigauge.models import SnapshotStatus
@@ -88,3 +89,92 @@ def test_refresh_throttles_successful_requests_for_15_minutes(monkeypatch):
     current[0] += timedelta(seconds=1)
     provider.refresh(snapshots.append)
     assert provider.calls == 2
+
+
+import json
+from pathlib import Path
+import responses
+from aigauge.providers.codex_resets import CODEX_RESETS_URL, CodexResetsProvider
+
+FIXTURES = Path(__file__).parent / "fixtures" / "resets"
+
+def _fixture(name):
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+def _sync(provider, monkeypatch):
+    monkeypatch.setattr(provider, "_run_async", lambda work, on_done: on_done(work()))
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ms-msdt:/id PCWDiagnostic",
+        "file:///C:/Windows/win.ini",
+        "javascript:alert(1)",
+        "https:///nohost",
+        "",
+    ],
+)
+def test_reset_event_rejects_non_http_urls(url):
+    event = ResetEvent("landed", "1", NOW, "summary", "detail", url)
+    assert event.url is None
+
+@pytest.mark.parametrize("url", ["https://x.example/p", "HTTPS://X.EXAMPLE/p"])
+def test_reset_event_accepts_http_urls(url):
+    assert ResetEvent("landed", "1", NOW, "summary", "detail", url).url == url
+
+@responses.activate
+def test_failed_fetches_back_off_for_15_minutes_even_after_success(monkeypatch):
+    current = [NOW]
+    provider = CodexResetsProvider(clock=lambda: current[0])
+    _sync(provider, monkeypatch)
+    responses.add(responses.GET, CODEX_RESETS_URL, json=_fixture("codex_status.json"), status=200)
+    for _ in range(2):
+        responses.add(responses.GET, CODEX_RESETS_URL, status=503)
+    provider.refresh(lambda snapshot: None)
+    current[0] += timedelta(minutes=15)
+    provider.refresh(lambda snapshot: None)
+    assert len(responses.calls) == 2
+    for _ in range(14):
+        current[0] += timedelta(minutes=1)
+        provider.refresh(lambda snapshot: None)
+    assert len(responses.calls) == 2
+    current[0] += timedelta(minutes=1)
+    provider.refresh(lambda snapshot: None)
+    assert len(responses.calls) == 3
+
+@pytest.mark.parametrize(("retry_after", "blocked", "advance"), [
+    ("3600", timedelta(minutes=59, seconds=59), timedelta(seconds=1)),
+    ("0", timedelta(minutes=14, seconds=59), timedelta(seconds=1)),
+])
+@responses.activate
+def test_retry_after_is_a_minimum_15_minute_backoff(monkeypatch, retry_after, blocked, advance):
+    current = [NOW]
+    provider = CodexResetsProvider(clock=lambda: current[0])
+    _sync(provider, monkeypatch)
+    responses.add(responses.GET, CODEX_RESETS_URL, status=429, headers={"Retry-After": retry_after})
+    responses.add(responses.GET, CODEX_RESETS_URL, json=_fixture("codex_status.json"), status=200)
+    provider.refresh(lambda snapshot: None)
+    current[0] += blocked
+    provider.refresh(lambda snapshot: None)
+    assert len(responses.calls) == 1
+    current[0] += advance
+    provider.refresh(lambda snapshot: None)
+    assert len(responses.calls) == 2
+
+@responses.activate
+def test_invalid_payload_does_not_commit_new_etag(monkeypatch):
+    current = [NOW]
+    provider = CodexResetsProvider(clock=lambda: current[0])
+    _sync(provider, monkeypatch)
+    responses.add(responses.GET, CODEX_RESETS_URL, json={"invalid": True}, status=200,
+                  headers={"ETag": '"bad-payload"'})
+    responses.add(responses.GET, CODEX_RESETS_URL, json=_fixture("codex_status.json"), status=200,
+                  headers={"ETag": '"valid-payload"'})
+    snapshots = []
+    provider.refresh(snapshots.append)
+    assert snapshots[0].status == SnapshotStatus.ERROR
+    assert provider._etag is None
+    current[0] += provider.MIN_INTERVAL
+    provider.refresh(snapshots.append)
+    assert "If-None-Match" not in responses.calls[1].request.headers
+    assert provider._etag == '"valid-payload"'
