@@ -7,6 +7,10 @@
 <p align="center"><strong>Know your AI usage at a glance.</strong></p>
 
 <p align="center">
+  <strong>English</strong> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/DraftingDreamer/ai-gauge/actions/workflows/test.yml"><img src="https://github.com/DraftingDreamer/ai-gauge/actions/workflows/test.yml/badge.svg" alt="Test status" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078d4" alt="Windows, macOS, and Linux" />
   <img src="https://img.shields.io/badge/python-3.11%2B-3776ab" alt="Python 3.11+" />
