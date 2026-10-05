@@ -74,6 +74,6 @@ def test_missing_provider_is_error_and_http_headers(monkeypatch):
     assert snapshots[0].error == "unexpected payload"
     headers = responses.calls[0].request.headers
     assert headers["User-Agent"] == (
-        "ai-gauge/0.8.4 (+https://github.com/DraftingDreamer/ai-gauge)"
+        "ai-gauge/0.9.0 (+https://github.com/DraftingDreamer/ai-gauge)"
     )
     assert "If-None-Match" not in headers

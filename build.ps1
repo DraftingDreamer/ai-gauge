@@ -1,4 +1,4 @@
-#requires -version 7
+﻿#requires -version 7
 <#
 Build a standalone Windows .exe using PyInstaller.
 
@@ -11,6 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$projectRoot = $PSScriptRoot
 
 $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
@@ -53,10 +54,84 @@ $args = @(
 )
 if ($OneFile) { $args += "--onefile" }
 
-& $venvPython @args
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "PyInstaller build failed. If dist\ai-gauge\ai-gauge.exe is locked, close the running app and try again."
+function Get-ProcessPathState {
+    @(
+        [Environment]::GetEnvironmentVariables('Process').GetEnumerator() |
+            Where-Object { $_.Key -ieq 'PATH' } |
+            Sort-Object { [string]$_.Key } |
+            ForEach-Object { "$($_.Key)=$($_.Value)" }
+    )
 }
+
+function Invoke-PyInstaller([string[]]$Arguments) {
+    $parentPathState = @(Get-ProcessPathState)
+    $process = $null
+    try {
+        # PyInstaller resolves native DLLs through PATH. Keep inherited tools
+        # such as Poppler out of that search so their ICU DLLs cannot shadow
+        # the Windows system ICU required by Qt6Core.
+        $basePython = (& $venvPython -c "import sys; print(sys.base_prefix)").Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $basePython) {
+            Write-Error "Could not determine the base Python installation for a clean build PATH."
+        }
+        $systemRoot = $env:SystemRoot
+        if (-not $systemRoot) { $systemRoot = [Environment]::GetFolderPath('Windows') }
+        $buildPath = @(
+            (Join-Path $projectRoot ".venv\Scripts"),
+            $basePython,
+            (Join-Path $basePython "Scripts"),
+            (Join-Path $systemRoot "System32"),
+            $systemRoot
+        ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+        # The Codex Windows runner can expose both Path and PATH in the same
+        # process environment. Updating $env:PATH changes only one entry, and
+        # CreateProcess may pass the other one to Python. Build a fresh child
+        # environment so PyInstaller receives exactly one controlled PATH.
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $venvPython
+        $startInfo.WorkingDirectory = $projectRoot
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        foreach ($argument in $Arguments) {
+            [void]$startInfo.ArgumentList.Add($argument)
+        }
+        foreach ($pathKey in @($startInfo.Environment.Keys | Where-Object { $_ -ieq 'PATH' })) {
+            [void]$startInfo.Environment.Remove($pathKey)
+        }
+        $startInfo.Environment['PATH'] = $buildPath -join ';'
+
+        $childPathKeys = @($startInfo.Environment.Keys | Where-Object { $_ -ieq 'PATH' })
+        if ($childPathKeys.Count -ne 1 -or $startInfo.Environment[$childPathKeys[0]] -cne ($buildPath -join ';')) {
+            Write-Error "Could not create a clean PyInstaller child environment."
+        }
+
+        $process = [Diagnostics.Process]::Start($startInfo)
+        if (-not $process) {
+            Write-Error "Could not start PyInstaller."
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $childStdout = $stdoutTask.GetAwaiter().GetResult()
+        $childStderr = $stderrTask.GetAwaiter().GetResult()
+        if ($childStdout) { [Console]::Out.Write($childStdout) }
+        if ($childStderr) { [Console]::Error.Write($childStderr) }
+        if ($process.ExitCode -ne 0) {
+            Write-Error "PyInstaller build failed with exit code $($process.ExitCode). If dist\ai-gauge\ai-gauge.exe is locked, close the running app and try again."
+        }
+    } finally {
+        if ($process) { $process.Dispose() }
+        $currentPathState = @(Get-ProcessPathState)
+        if (Compare-Object -ReferenceObject $parentPathState -DifferenceObject $currentPathState -CaseSensitive) {
+            Write-Error "The parent PATH environment changed during the PyInstaller build."
+        }
+    }
+}
+
+Invoke-PyInstaller $args
 
 # The helper is an unsigned console binary that MCP clients launch headlessly,
 # so a Defender/SmartScreen block is silent. Give it the same product/version
@@ -86,8 +161,11 @@ $mcpArgs = @(
     "--paths", "src",
     "pyinstaller_mcp_entry.py"
 )
-& $venvPython @mcpArgs
-if ($LASTEXITCODE -ne 0) { Write-Error "MCP helper build failed." }
+try {
+    Invoke-PyInstaller $mcpArgs
+} catch {
+    Write-Error "MCP helper build failed. $($_.Exception.Message)"
+}
 if (-not $OneFile) {
     $mcpSource = Join-Path $PSScriptRoot "dist\ai-gauge-mcp.exe"
     $mcpTarget = Join-Path $PSScriptRoot "dist\ai-gauge\ai-gauge-mcp.exe"

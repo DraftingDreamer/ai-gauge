@@ -7,6 +7,8 @@ into the process (issue #7).
 
 from __future__ import annotations
 
+from ..providers._codex_page import CODEX_USAGE_URL, VERIFY_JS
+
 # Load the provider's actual usage page and check for text that only renders for
 # a signed-in user. If the cookie is good the page renders inline; if not it
 # either redirects to /login or shows an interstitial.
@@ -31,18 +33,7 @@ VERIFY_TARGETS = {
         })()""",
     ),
     "codex": (
-        "https://chatgpt.com/codex/cloud/settings/analytics#personal-usage",
-        r"""(() => {
-          const visibleText = el => ((el && (el.innerText || el.textContent)) || '').replace(/\s+/g, ' ').trim();
-          const text = visibleText(document.body);
-          if (/Weekly usage limit/i.test(text) && /\d+(?:\.\d+)?\s*%/.test(text)) {
-            return true;
-          }
-          const labels = Array.from(document.querySelectorAll('button,a,[role="tab"],[role="button"]'));
-          const label = labels.find(el => visibleText(el).toLowerCase() === 'personal usage');
-          const target = label && (label.closest('button,a,[role="tab"],[role="button"]') || label);
-          if (target) target.click();
-          return false;
-        })()""",
+        CODEX_USAGE_URL,
+        VERIFY_JS,
     ),
 }

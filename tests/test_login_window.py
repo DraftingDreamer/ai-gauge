@@ -7,6 +7,7 @@ from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import QPushButton
 
 from aigauge.webview import login_window
+from aigauge.providers._codex_page import CODEX_USAGE_URL, VERIFY_JS
 from aigauge.webview.login_window import (
     LoginWindow,
     VERIFY_TARGETS,
@@ -63,13 +64,15 @@ def test_logged_blocked_url_drops_query_and_fragment():
 def test_codex_verification_accepts_weekly_only_usage_page():
     _, check_js = VERIFY_TARGETS["codex"]
 
-    success_check = check_js.split("return true", maxsplit=1)[0]
-    assert "/Weekly usage limit/i.test(text)" in success_check
-    assert "/5 hour usage limit/i.test(text)" not in success_check
-    assert (
-        """querySelectorAll('button,a,[role="tab"],[role="button"]')""" in check_js
-    )
-    assert ",div,span,p" not in check_js
+    assert VERIFY_TARGETS["codex"] == (CODEX_USAGE_URL, VERIFY_JS)
+    assert check_js is VERIFY_JS
+
+
+def test_cookie_login_and_settings_share_codex_overview_target():
+    from aigauge import settings_dialog
+
+    assert settings_dialog.CODEX_USAGE_URL == CODEX_USAGE_URL
+    assert VERIFY_TARGETS["codex"][0] == settings_dialog.CODEX_USAGE_URL
 
 
 def test_claude_verification_accepts_authenticated_home_shell(tmp_path):

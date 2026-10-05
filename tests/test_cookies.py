@@ -1,8 +1,16 @@
 from aigauge.config import BrowserAccount, Config
+from aigauge.cookie_dialog import INSTRUCTIONS
 from aigauge.webview.cookies import _parse_cookie_pairs
 from aigauge.webview import cookies
 
 
+def test_codex_cookie_instructions_link_to_usage_overview():
+    _title, instructions = INSTRUCTIONS["codex"]
+
+    assert "href='https://chatgpt.com/settings/usage'" in instructions
+    assert "chatgpt.com/settings/usage" in instructions
+    assert "codex/cloud/settings/analytics" not in instructions
+    assert "<code>analytics</code>" not in instructions
 def test_parse_codex_full_cookie_header_keeps_related_cookies():
     pasted = (
         "Cookie: __Host-next-auth.csrf-token=csrf; "

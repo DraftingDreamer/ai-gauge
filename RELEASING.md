@@ -21,56 +21,44 @@ For AI Gauge, the release page should include:
 - A short note that the app is unsigned unless code signing has been added.
 - Windows artifact SHA256 and Authenticode status for Defender triage.
 
-## Release Checklist (automated path)
+## CI and release checklist
 
-The recommended path uses [.github/workflows/release.yml](.github/workflows/release.yml):
-pushing a `v*` tag fans out a 3-OS build matrix (Windows, macOS, Ubuntu).
-Each runner runs the test suite, builds its OS's standalone bundle, packages
-it, computes a SHA256, and uploads both files as job artifacts. A final job
-collects all artifacts and attaches them to a **draft** release on GitHub.
-You publish the draft from the web UI.
+The test workflow runs on pull requests and pushes to `main`, across Windows,
+macOS, and Ubuntu with Python 3.11 and 3.12. It runs the version consistency
+check and test suite. A green local run does not substitute for checking the
+actual Actions results on the target commit.
 
-1. Confirm `pyproject.toml`, `src/aigauge/__init__.py`, `README.md`, and
-   `CHANGELOG.md` all show the new version. The release workflow runs
-   `tools/check_versions.py` and also rejects mismatched tag/pyproject
-   versions, but a local pre-flight catches issues sooner:
+Before tagging, confirm `pyproject.toml`, `src/aigauge/__init__.py`, README,
+and CHANGELOG agree on the release version. The local preflight is:
 
-   ```powershell
-   # Windows
-   .venv\Scripts\python.exe tools\check_versions.py
-   .venv\Scripts\python.exe -m pytest
-   .\build.ps1
-   .\dist\ai-gauge\ai-gauge.exe   # smoke-test
-   ```
+```text
+uv run tools/check_versions.py
+uv run pytest
+```
 
-   ```bash
-   # macOS / Linux
-   .venv/bin/python tools/check_versions.py
-   .venv/bin/python -m pytest
-   ./build.sh
-   open dist/ai-gauge.app          # macOS smoke-test
-   ./dist/ai-gauge/ai-gauge        # Linux smoke-test
-   ```
+For a packaging trial, use the release workflow's `workflow_dispatch` test-build
+path. It builds the three platform archives and SHA256 files as downloadable
+workflow artifacts only; it must not create or alter a GitHub Release. Review
+the artifacts and run the GUI and MCP helper from each extracted bundle in an
+isolated smoke setup. Do not install over a user's existing AI Gauge copy or
+use its live profile for this check. The CI and bundle smoke checks do not
+prove that live Claude, Codex, or other provider accounts work, and do not
+count as real-account testing on macOS or Linux.
 
-2. Commit the release prep changes to `main`.
-3. Create and push the version tag:
+After release preparation is committed to `main`, push the matching `v<version>`
+tag. The `v*` release workflow builds Windows, macOS, and Linux bundles, creates
+SHA256 files, and attaches each archive/checksum pair to a **draft** release on
+the [DraftingDreamer Releases page](https://github.com/DraftingDreamer/ai-gauge/releases):
 
-   ```powershell
-   git tag v<version>
-   git push origin main
-   git push origin v<version>
-   ```
+- `ai-gauge-<version>-windows.zip` (+ `.sha256`)
+- `ai-gauge-<version>-macos.tar.gz` (+ `.sha256`)
+- `ai-gauge-<version>-linux.tar.gz` (+ `.sha256`)
 
-4. Watch the **release** workflow under the Actions tab. On success it
-   creates a draft release on the [Releases page](https://github.com/jpajak/ai-gauge/releases)
-   with three artifact pairs attached:
-   - `ai-gauge-<version>-windows.zip` (+ `.sha256`)
-   - `ai-gauge-<version>-macos.tar.gz` (+ `.sha256`)
-   - `ai-gauge-<version>-linux.tar.gz` (+ `.sha256`)
-5. Open the draft release, paste the relevant changelog notes into the body
-   (the workflow auto-generates a commit list, but the changelog reads
-   better), and click **Publish release**. Mark as prerelease if you want a
-   soft launch.
+Before publishing, verify the tag and version, all six asset names, hashes,
+archive contents, unsigned-build notes, and isolated GUI/MCP smoke evidence.
+Replace the generated commit summary with the matching CHANGELOG notes. Publish
+the release from GitHub only after those checks pass. A draft build or a
+successful workflow run alone is not approval to publish.
 
 ## Manual fallback
 
@@ -79,8 +67,11 @@ fork without Actions enabled), the manual flow still works — but you'll
 need access to a machine of each OS you intend to ship for, since
 PyInstaller cross-compilation isn't supported.
 
-1. Run the same local pre-flight in step 1 above on each target OS.
-2. Package the build. `build.ps1` / `build.sh` place `ai-gauge-mcp` inside
+1. On each target OS, run `uv run tools/check_versions.py` and `uv run pytest`,
+   then create a fresh bundle with `pwsh -File ./build.ps1` on Windows or
+   `./build.sh` on macOS/Linux. Run `tools/smoke_test_gui.py` against that bundle
+   and `tools/smoke_test_mcp.py` against its helper, using the build virtualenv.
+2. Package the verified build. `build.ps1` / `build.sh` place `ai-gauge-mcp` inside
    `dist/ai-gauge/` on Windows and Linux, but leave it at `dist/ai-gauge-mcp`
    on macOS — so the macOS archive must name it explicitly or it ships
    without the MCP helper:
@@ -103,9 +94,10 @@ PyInstaller cross-compilation isn't supported.
    shasum -a 256 ai-gauge-<ver>-macos.tar.gz
    ```
 
-4. Push the version tag, then in GitHub go to **Releases** → **Draft a new
-   release**, select the tag, paste the changelog notes, and attach all
-   archive + `.sha256` pairs.
+4. Push the version tag, then in GitHub go to the DraftingDreamer repository's
+   **Releases** → **Draft a new release**, select the tag, paste the changelog
+   notes, and attach all archive + `.sha256` pairs. Publish only after checking
+   all archives, hashes, and isolated GUI/MCP smoke results.
 
 ## Suggested Release Notes Shape
 

@@ -235,19 +235,10 @@ def test_codex_weekly_only_without_shared_layout_context_is_transient_error():
     assert "part of the usage cards" in (snapshot.error or "")
 
 
-def test_codex_extractor_stops_waiting_when_weekly_card_is_ready():
-    personal_usage_logic = EXTRACTOR_JS.split(
-        "function maybeSelectPersonalUsageTab",
-        maxsplit=1,
-    )[1].split("function findCardByLabel", maxsplit=1)[0]
-
-    assert "/Weekly usage limit/i.test(bodyText)" in personal_usage_logic
-    assert "/5 hour usage limit/i.test(bodyText)" not in personal_usage_logic
-    assert (
-        """querySelectorAll('button,a,[role="tab"],[role="button"]')"""
-        in personal_usage_logic
-    )
-    assert ",div,span,p" not in personal_usage_logic
+def test_codex_extractor_uses_shared_overview_logic():
+    assert 'function getCodexPageState()' in EXTRACTOR_JS
+    assert 'maybeSelectOverview(bodyText)' in EXTRACTOR_JS
+    assert 'aria-pressed' in EXTRACTOR_JS
 
 
 def test_codex_active_session_with_unused_weekly_limit_is_valid():
@@ -372,3 +363,133 @@ def test_codex_body_text_fallback_reads_new_visible_cards():
     assert snapshot.status == SnapshotStatus.OK
     assert [metric.percent_used for metric in snapshot.metrics] == [1.0, 6.0]
     assert all(metric.resets_at is not None for metric in snapshot.metrics)
+
+
+def test_codex_overview_body_fallback_reads_only_confirmed_weekly_quota():
+    snapshot = _build_snapshot(
+        {
+            "logged_out": False,
+            "overview_confirmed": True,
+            "session": None,
+            "weekly": None,
+            "title": "Codex",
+            "url": CODEX_USAGE_URL,
+            "body_text": "Usage Overview Weekly limits 5 天 10 小時後重設 剩餘 94%",
+        }
+    )
+
+    assert snapshot.status == SnapshotStatus.OK
+    assert [metric.label for metric in snapshot.metrics] == ["Weekly"]
+    assert snapshot.metrics[0].percent_used == 6.0
+    assert snapshot.metrics[0].resets_at is not None
+
+
+def test_codex_overview_weekly_history_is_not_a_quota():
+    snapshot = _build_snapshot(
+        {
+            "logged_out": False,
+            "overview_confirmed": True,
+            "weekly": None,
+            "title": "Codex",
+            "url": CODEX_USAGE_URL,
+            "body_text": (
+                "Usage Overview Analytics Usage history Tasks 80.4% Subagents 19.2% "
+                "Plan usage history Weekly limits Period % of limit used Sep 21-26 73.9%"
+            ),
+        }
+    )
+
+    assert snapshot.status == SnapshotStatus.ERROR
+    assert snapshot.metrics == []
+
+
+def test_codex_overview_session_heading_without_card_does_not_use_weekly_alone():
+    snapshot = _build_snapshot(
+        {
+            "logged_out": False,
+            "overview_confirmed": True,
+            "weekly": {"percent": 94, "kind": "remaining", "reset_text": "5 days 10 hours"},
+            "title": "Codex",
+            "url": CODEX_USAGE_URL,
+            "body_text": "5 hour usage limit Weekly limits 94% remaining",
+        }
+    )
+
+    assert snapshot.status == SnapshotStatus.ERROR
+    assert snapshot.metrics == []
+
+
+def test_codex_overview_accepts_explicit_idle_boundary_percentages():
+    for percent, kind in ((100, "remaining"), (0, "used")):
+        snapshot = _build_snapshot(
+            {
+                "logged_out": False,
+                "overview_confirmed": True,
+                "weekly": {"percent": percent, "kind": kind, "reset_text": None},
+                "title": "Codex",
+                "url": CODEX_USAGE_URL,
+                "body_text": f"Usage Overview Weekly limits {percent}% {kind}",
+            }
+        )
+        assert snapshot.status == SnapshotStatus.OK
+        assert snapshot.metrics[0].percent_used == 0.0
+
+
+def test_codex_overview_rejects_invalid_or_unknown_percentages():
+    for percent, kind in ((101, "used"), (-1, "used"), (12, "unknown")):
+        snapshot = _build_snapshot(
+            {
+                "logged_out": False,
+                "overview_confirmed": True,
+                "weekly": {"percent": percent, "kind": kind, "reset_text": "2 days"},
+                "title": "Codex",
+                "url": CODEX_USAGE_URL,
+                "body_text": "Usage Overview Weekly limits",
+            }
+        )
+        assert snapshot.status == SnapshotStatus.ERROR
+        assert snapshot.metrics == []
+
+
+def test_codex_relative_reset_parser_accepts_injected_clock_and_chinese_days():
+    now = datetime(2026, 10, 4, 9, 0)
+    assert _parse_reset_text("5 天 10 小時", now=now) == now + timedelta(hours=130)
+    assert _parse_reset_text("in 5 days 10 hours", now=now) == now + timedelta(hours=130)
+
+
+def test_codex_overview_body_fallback_reads_percent_before_reset_countdown():
+    snapshot = _build_snapshot(
+        {
+            "logged_out": False,
+            "overview_confirmed": True,
+            "weekly": None,
+            "title": "Codex",
+            "url": CODEX_USAGE_URL,
+            "body_text": "Usage Overview Weekly limits 94% remaining 5 days 10 hours until reset",
+        }
+    )
+
+    assert snapshot.status == SnapshotStatus.OK
+    assert snapshot.metrics[0].percent_used == 6.0
+    assert snapshot.metrics[0].resets_at is not None
+
+
+def test_codex_overview_keeps_structured_idle_card_when_body_is_truncated():
+    snapshot = _build_snapshot(
+        {
+            "logged_out": False,
+            "overview_confirmed": True,
+            "weekly": {
+                "percent": 100,
+                "kind": "remaining",
+                "reset_text": None,
+                "raw": "Weekly limits 100% remaining",
+            },
+            "title": "Codex",
+            "url": CODEX_USAGE_URL,
+            "body_text": "Usage Overview",
+        }
+    )
+
+    assert snapshot.status == SnapshotStatus.OK
+    assert snapshot.metrics[0].percent_used == 0.0

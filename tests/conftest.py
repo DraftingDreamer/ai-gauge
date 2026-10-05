@@ -30,8 +30,9 @@ def block_native_toast(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def isolated_appdata(tmp_path, monkeypatch):
-    """Redirect %APPDATA% so config writes never touch the user's real folder."""
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    """Keep config and log discovery inside the test directory on every OS."""
+    for name in ("APPDATA", "LOCALAPPDATA", "HOME", "USERPROFILE", "XDG_CONFIG_HOME"):
+        monkeypatch.setenv(name, str(tmp_path))
     yield
 
 

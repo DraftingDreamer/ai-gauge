@@ -10,7 +10,7 @@ Please do not open a public issue for a vulnerability that exposes session
 cookies, GitHub tokens, OpenCode/OpenRouter keys, or other secrets.
 
 Preferred channel: open a private security advisory at
-<https://github.com/jpajak/ai-gauge/security/advisories/new>.
+<https://github.com/DraftingDreamer/ai-gauge/security/advisories/new>.
 
 If that is not available, contact the maintainer directly through their
 GitHub profile and include:

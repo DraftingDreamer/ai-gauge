@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -22,6 +25,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+
+      - name: Set up Node.js 22 for extractor tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Confirm Node.js runtime
+        run: node --version
 
       - name: Install Linux Qt runtime libs
         if: matrix.os == 'ubuntu-22.04'
@@ -44,6 +55,14 @@ jobs:
       - name: Run pytest
         env:
           QT_QPA_PLATFORM: offscreen
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          all_proxy: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1,::1
+          no_proxy: localhost,127.0.0.1,::1
         run: pytest -q
 
   mcp-helper-smoke:

@@ -4,9 +4,10 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   resolve-version:
@@ -16,25 +17,30 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - id: ver
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
-          version="${tag#v}"
-          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          tag=""
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="$GITHUB_REF_NAME"
+            tag_version="${tag#v}"
+            if [ "$tag_version" != "$version" ]; then
+              echo "tag version $tag_version != pyproject.toml version $version" >&2
+              exit 1
+            fi
+            echo "Tag and pyproject agree on $version"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Confirm tag matches pyproject version
+      - name: Confirm tag matches pyproject version (tag pushes only)
+        if: github.event_name == 'push'
         shell: bash
         run: |
-          proj_version=$(grep -E '^version\s*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          if [ -z "$proj_version" ]; then
-              echo "could not find version in pyproject.toml" >&2; exit 1
-          fi
-          if [ "$proj_version" != "${{ steps.ver.outputs.version }}" ]; then
-              echo "tag version ${{ steps.ver.outputs.version }} != pyproject.toml version $proj_version" >&2
-              exit 1
-          fi
-          echo "Tag and pyproject agree on $proj_version"
+          test "${GITHUB_REF_NAME#v}" = "${{ steps.ver.outputs.version }}"
 
   build:
     needs: resolve-version
@@ -62,6 +68,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Set up Node.js 22 for extractor tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Confirm Node.js runtime
+        run: node --version
 
       - name: Bootstrap virtualenv (Windows)
         if: matrix.os == 'windows-latest'
@@ -96,15 +110,33 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          all_proxy: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1,::1
+          no_proxy: localhost,127.0.0.1,::1
         run: |
           .\.venv\Scripts\python.exe tools\check_versions.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\.venv\Scripts\python.exe -m pytest -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run tests (macOS / Linux)
         if: matrix.os != 'windows-latest'
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          all_proxy: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1,::1
+          no_proxy: localhost,127.0.0.1,::1
         run: |
           .venv/bin/python tools/check_versions.py
           .venv/bin/python -m pytest -q
@@ -133,6 +165,19 @@ jobs:
       - name: Smoke test MCP helper (Linux)
         if: matrix.os == 'ubuntu-22.04'
         run: .venv/bin/python tools/smoke_test_mcp.py dist/ai-gauge/ai-gauge-mcp
+
+      - name: Smoke test packaged GUI (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe tools\smoke_test_gui.py dist\ai-gauge
+
+      - name: Smoke test packaged GUI (macOS)
+        if: matrix.os == 'macos-latest'
+        run: .venv/bin/python tools/smoke_test_gui.py dist/ai-gauge.app
+
+      - name: Smoke test packaged GUI (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: .venv/bin/python tools/smoke_test_gui.py dist/ai-gauge
 
       - name: Package (Windows zip + sha256)
         id: pack_win
@@ -177,7 +222,10 @@ jobs:
 
   release:
     needs: [resolve-version, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

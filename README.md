@@ -7,11 +7,21 @@
 <p align="center"><strong>Know your AI usage at a glance.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/jpajak/ai-gauge/actions/workflows/test.yml"><img src="https://github.com/jpajak/ai-gauge/actions/workflows/test.yml/badge.svg" alt="Test status" /></a>
+  <a href="https://github.com/DraftingDreamer/ai-gauge/actions/workflows/test.yml"><img src="https://github.com/DraftingDreamer/ai-gauge/actions/workflows/test.yml/badge.svg" alt="Test status" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078d4" alt="Windows, macOS, and Linux" />
   <img src="https://img.shields.io/badge/python-3.11%2B-3776ab" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license" />
 </p>
+
+This is the **DraftingDreamer fork** of [AI Gauge by John Pajak](https://github.com/jpajak/ai-gauge), maintained at [DraftingDreamer/ai-gauge](https://github.com/DraftingDreamer/ai-gauge). It retains the upstream project's MIT license and source attribution. Fork-specific additions are summarized here; see the [upstream project](https://github.com/jpajak/ai-gauge) for its original features and history.
+
+| Fork addition | What it does |
+| --- | --- |
+| Antigravity quota | Reads local `agy /quota` output, supports executable selection and Gemini / Claude+GPT display groups, and stops polling when a response may have consumed tokens. |
+| Reset announcements | Adds Codex Resets and Claude Resets tiles; Windows uses concurrent native toast notifications, with tray-balloon fallback. |
+| Refresh status | Error labels show the cause and mark retained values as stale. |
+| Codex Overview | Reads current quota from the Overview page in English and Traditional Chinese, includes weekly reset countdowns, and rejects Analytics history as current quota. |
+| Claude sign-in | Shows a Sign in action for recognized sign-in redirects; based in part on changes by [innoscoutpro](https://github.com/innoscoutpro/ai-gauge/commits?author=innoscoutpro). |
 
 AI Gauge is a compact desktop monitor for **Claude.ai**, **ChatGPT Codex**,
 **Antigravity**, **OpenCode Go**, **GitHub Copilot**, and **OpenRouter**. It shows
@@ -24,7 +34,7 @@ this computer.
 
 > **Requires Python 3.11+.** Secrets live in the OS-native credential store (Windows Credential Manager / DPAPI, macOS Keychain, Linux Secret Service). Auto-start uses the platform's standard mechanism (Windows Task Scheduler / LaunchAgent / `~/.config/autostart`).
 
-Current version: **0.8.4**. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+Current version: **0.9.0**. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 AI Gauge is an independent open-source project and unofficial local desktop
 utility. It is not affiliated with Anthropic, OpenAI, GitHub, Microsoft,
@@ -49,7 +59,7 @@ notice.
 
 ## Download
 
-Pre-built binaries for each release are published on the [Releases page](https://github.com/jpajak/ai-gauge/releases). Pick the archive for your OS, extract, and run:
+Pre-built binaries for each release are published on the [DraftingDreamer Releases page](https://github.com/DraftingDreamer/ai-gauge/releases). Pick the archive for your OS, extract, and run:
 
 | OS      | Archive                              | Run                                |
 | ------- | ------------------------------------ | ---------------------------------- |
@@ -231,15 +241,15 @@ should work with the normal **Sign in** button.
 
 ## Build a standalone binary
 
-For most users the [pre-built downloads](#download) are easier — this section is for building locally or for maintainers cutting releases. The build machine needs Python 3.11+ and a `.venv` with `pip install -e .[dev]` already run; the resulting binary does **not** require Python on the target machine.
+For most users the [pre-built downloads](#download) are easier — this section is for building locally or for maintainers cutting releases. The build machine needs Python 3.11+ and a `.venv` with `pip install -e .[dev]` already run. Windows builds also require PowerShell 7 (`pwsh`). The resulting binary does **not** require Python or PowerShell on the target machine.
 
 | OS      | Command          | Output                       |
 | ------- | ---------------- | ---------------------------- |
-| Windows | `.\build.ps1`    | `dist/ai-gauge/ai-gauge.exe` |
+| Windows | `pwsh -File .\build.ps1` | `dist/ai-gauge/ai-gauge.exe` |
 | macOS   | `./build.sh`     | `dist/ai-gauge.app`          |
 | Linux   | `./build.sh`     | `dist/ai-gauge/ai-gauge`     |
 
-Tagged commits matching `v*` automatically run [the release workflow](.github/workflows/release.yml), which builds all three platforms in CI and uploads them as a draft GitHub Release for the maintainer to publish.
+Tagged commits matching `v*` run [the release workflow](.github/workflows/release.yml), which builds all three platforms and prepares a draft GitHub Release with SHA256 files. A separate maintainer-triggered test build uploads artifacts without creating a release. The maintainer checks the draft artifacts and isolated GUI/MCP smoke results before publishing; see [RELEASING.md](RELEASING.md). CI does not validate live provider accounts.
 
 Bundles are ~150-200 MB because the Chromium runtime ships inside. User data still lives outside the bundle, under the per-OS app-data directory.
 
@@ -288,9 +298,10 @@ macOS quarantine handling, and the guard's security model.
 
 ## Contributing
 
-Bug reports, provider-layout fixes, and PRs are welcome. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for environment setup, test commands, and
-the issue templates to use.
+Bug reports, provider-layout fixes, and PRs are welcome. Open fork-specific
+issues on the [DraftingDreamer issue tracker](https://github.com/DraftingDreamer/ai-gauge/issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup, test commands,
+and the issue templates to use.
 
 ## Notes / limitations
 

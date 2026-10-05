@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QPushButton
 
 from aigauge import settings_dialog
 from aigauge.config import BrowserAccount, ColorThresholds, Config
+from aigauge.providers._codex_page import CODEX_USAGE_URL
 from aigauge.settings_dialog import SettingsDialog
 
 
@@ -77,6 +78,7 @@ def test_codex_open_usage_button_launches_browser(qtbot, monkeypatch):
     _button(dialog, "codex_open_usage_btn").click()
 
     assert opened == [settings_dialog.CODEX_USAGE_URL]
+    assert settings_dialog.CODEX_USAGE_URL == CODEX_USAGE_URL
 
 
 def test_mcp_integration_defaults_off_and_gates_policies(qtbot, monkeypatch):

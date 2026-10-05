@@ -1,23 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-10-05
 
-### Changed
+### Inherited upstream cleanup
 
 - Removed the obsolete OpenCode browser-session, cookie-paste, and webpage-verification implementation. OpenCode usage now uses only the authenticated Go API introduced in 0.8.4, with a separate API key stored in the system credential store for each configured account. Claude and Codex browser sign-in are unchanged.
 
-### Added
+### Fork additions and changes
 
 - Optional Antigravity quota tracking reads from the local `agy` CLI; Codex Resets and Claude Resets announcement tiles and configurable reset alerts are available.
-- Native Windows toast notifications show reset announcements, with a system-tray balloon fallback.
-
-### Changed
-
-- Provider tiles now show short refresh-error causes and mark retained values as stale.
-
-### Fixed
-
-- Claude usage-page auth redirects now show a **Sign in** action instead of being treated as a retryable scrape failure, and the sign-in title is recognized. Cherry-picked from [innoscoutpro/ai-gauge report auth redirects](https://github.com/innoscoutpro/ai-gauge/commit/b91170ab6e38a4037eda744e13b4ea8ae00d96a1) and [innoscoutpro/ai-gauge recognize the sign-in title](https://github.com/innoscoutpro/ai-gauge/commit/a45e5f06df2af3881aae9427bcfe27310b1b54fe).
+- Native Windows toast notifications show reset announcements concurrently, with a system-tray balloon fallback.
+- Windows packaging isolates DLL lookup from unrelated tools to avoid ICU/Qt startup failures.
+- Provider tiles show short refresh-error causes and mark retained values as stale.
+- Codex refresh and sign-in checks now use the Usage Overview page, including Traditional Chinese weekly cards and countdowns with days. Current quotas are kept separate from Analytics history, while older Session and Weekly layouts remain supported.
+- Claude usage-page auth redirects show a **Sign in** action instead of being treated as a retryable scrape failure, and the sign-in title is recognized. Cherry-picked from [innoscoutpro/ai-gauge](https://github.com/innoscoutpro/ai-gauge/commits?author=innoscoutpro): [auth redirect handling](https://github.com/innoscoutpro/ai-gauge/commit/b91170ab6e38a4037eda744e13b4ea8ae00d96a1) and [sign-in title recognition](https://github.com/innoscoutpro/ai-gauge/commit/a45e5f06df2af3881aae9427bcfe27310b1b54fe).
 
 ## 0.8.4 - 2026-09-19
 

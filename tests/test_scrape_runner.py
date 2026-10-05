@@ -5,7 +5,9 @@ import pytest
 
 from aigauge.models import SnapshotStatus, UsageSnapshot
 from aigauge.providers import _scrape_runner as runner_module
+from aigauge.providers import codex as codex_module
 from aigauge.providers._scrape_runner import ScrapeRunner
+from aigauge.providers.codex import CodexProvider
 
 
 class _FakeDoneSignal:
@@ -119,6 +121,79 @@ def test_scrape_runner_stops_retrying_after_limit(fake_scraper):
     assert len(fake_scraper.instances) == 2, "should not retry past build_max_attempts"
     assert len(received) == 1
     assert received[0].status == SnapshotStatus.ERROR
+
+
+def test_codex_empty_analytics_payload_retries_then_returns_weekly_usage(fake_scraper):
+    """An analytics shell without cards gets one bounded whole-page retry."""
+    from aigauge.providers.codex import _build_snapshot
+
+    received: list[UsageSnapshot] = []
+    rn = ScrapeRunner(
+        account_id="codex-work",
+        url="https://chatgpt.com/settings/usage",
+        extractor_js="extract",
+        build=lambda payload: _build_snapshot(payload, account_id="codex-work"),
+        log=logging.getLogger("test"),
+        build_max_attempts=2,
+    )
+    rn.run(received.append)
+
+    fake_scraper.instances[0].done.emit(
+        {
+            "logged_out": False,
+            "session": None,
+            "weekly": None,
+            "title": "Codex",
+            "url": "https://chatgpt.com/settings/usage",
+            "body_text": "Codex cloud tasks",
+            "overview_confirmed": False,
+        },
+        "",
+    )
+    assert received == []
+    assert len(fake_scraper.instances) == 2
+
+    fake_scraper.instances[1].done.emit(
+        {
+            "logged_out": False,
+            "session": None,
+            "weekly": {"percent": 37, "kind": "used", "reset_text": "Mon 6:00 PM"},
+            "title": "Codex",
+            "url": "https://chatgpt.com/settings/usage",
+            "body_text": "Usage Overview Weekly limits 37% used Resets Mon 6:00 PM",
+            "overview_confirmed": True,
+            "overview_ready": True,
+        },
+        "",
+    )
+
+    assert len(received) == 1
+    assert received[0].provider == "codex-work"
+    assert received[0].status == SnapshotStatus.OK
+    assert [(metric.label, metric.percent_used) for metric in received[0].metrics] == [
+        ("Weekly", 37)
+    ]
+
+
+def test_codex_refresh_uses_cache_busted_overview_url(monkeypatch):
+    captured = {}
+
+    class Runner:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run(self, on_done):
+            captured["on_done"] = on_done
+
+    monkeypatch.setattr(codex_module, "ScrapeRunner", Runner)
+    CodexProvider(account_id="codex-work").refresh(lambda _snapshot: None)
+
+    url = captured["url"]
+    assert url.startswith("https://chatgpt.com/settings/usage?")
+    assert "aigauge_ts=" in url
+    assert "/codex/cloud/settings/analytics" not in url
+    assert "#personal-usage" not in url
+    assert captured["account_id"] == "codex-work"
 
 
 def test_scrape_runner_surfaces_transport_error_without_build(fake_scraper):

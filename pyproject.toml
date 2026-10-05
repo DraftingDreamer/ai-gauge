@@ -1,6 +1,6 @@
 [project]
 name = "ai-gauge"
-version = "0.8.4"
+version = "0.9.0"
 description = "Compact cross-platform monitor for Claude, Codex, OpenCode Go, GitHub Copilot, and OpenRouter usage."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,10 +36,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jpajak/ai-gauge"
-Repository = "https://github.com/jpajak/ai-gauge"
-Issues = "https://github.com/jpajak/ai-gauge/issues"
-Security = "https://github.com/jpajak/ai-gauge/security"
+Homepage = "https://github.com/DraftingDreamer/ai-gauge"
+Repository = "https://github.com/DraftingDreamer/ai-gauge"
+Issues = "https://github.com/DraftingDreamer/ai-gauge/issues"
+Security = "https://github.com/DraftingDreamer/ai-gauge/security"
 
 [project.optional-dependencies]
 mcp = [

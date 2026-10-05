@@ -55,3 +55,35 @@ def test_failed_load_on_other_page_remains_transport_failure():
 
 def test_extractor_retry_limit_is_retryable_transport_error():
     assert "extractor retry limit exceeded" in HeadlessScraper._RETRYABLE_ERRORS
+
+
+def test_extractor_retry_delay_is_capped(monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(
+        "aigauge.webview.scraper.QTimer.singleShot",
+        lambda delay, callback: scheduled.append((delay, callback)),
+    )
+    page = type(
+        "Page",
+        (),
+        {
+            "url": lambda self: "https://chatgpt.com/settings/usage",
+            "title": lambda self: "ChatGPT",
+        },
+    )()
+    scrape = type(
+        "Scrape",
+        (),
+        {
+            "_finished": False,
+            "_provider": "codex",
+            "_extractor_reruns": 0,
+            "_page": page,
+            "_run_extractor": lambda self: None,
+        },
+    )()
+
+    HeadlessScraper._on_js_result(cast(Any, scrape), {"__retry_after_ms": 60_000})
+
+    assert scheduled[0][0] == 5000
+    assert scrape._extractor_reruns == 1

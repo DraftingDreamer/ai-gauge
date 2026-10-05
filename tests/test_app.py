@@ -653,6 +653,71 @@ def test_repeated_error_snapshot_keeps_stale_metrics():
     assert [(m.label, m.percent_used) for m in merged.metrics] == [("Session", 42.0)]
 
 
+def test_codex_error_keeps_work_stale_weekly_and_success_replaces_it():
+    app = App.__new__(App)
+    app._config = Config()  # noqa: SLF001
+    app._cleared_sessions = set()  # noqa: SLF001
+    app._snapshots = {  # noqa: SLF001
+        "codex-home": UsageSnapshot(
+            provider="codex-home", status=SnapshotStatus.OK,
+            metrics=[UsageMetric("Weekly", 11.0)],
+        ),
+        "codex-work": UsageSnapshot(
+            provider="codex-work", status=SnapshotStatus.OK,
+            metrics=[UsageMetric("Weekly", 22.0)],
+        ),
+    }
+    app._cycle_signatures = {}  # noqa: SLF001
+    app._inflight = set()  # noqa: SLF001
+    app._history = SimpleNamespace(record_snapshot=lambda _snapshot: [])  # noqa: SLF001
+    app._ratio = SimpleNamespace(  # noqa: SLF001
+        record_snapshot=lambda _snapshot: None,
+        display_estimate=lambda _provider: None,
+        current_estimate=lambda _provider: None,
+    )
+    app._ratio_recent = lambda _provider: []  # noqa: SLF001
+    app._widget = SimpleNamespace(  # noqa: SLF001
+        update_snapshot=lambda *_args: None,
+        set_ratio=lambda *_args: None,
+        set_refreshing=lambda _refreshing: None,
+    )
+    app._local_usage_on_snapshot = lambda _snapshot, _closed: None  # noqa: SLF001
+    app._refresh_queue = []  # noqa: SLF001
+    app._current_refresh_manual = True  # noqa: SLF001
+    app._unchanged_cycles = 0  # noqa: SLF001
+    app._cycle_changed = lambda: False  # noqa: SLF001
+    app._update_tray = lambda: None  # noqa: SLF001
+    app._schedule_next_refresh = lambda: None  # noqa: SLF001
+
+    app._on_snapshot(  # noqa: SLF001
+        UsageSnapshot(
+            provider="codex-work", status=SnapshotStatus.ERROR,
+            error="Codex usage page only rendered part of the usage cards; retrying.",
+        )
+    )
+    work = app._snapshots["codex-work"]  # noqa: SLF001
+    assert work.status == SnapshotStatus.ERROR
+    assert work.error == "Codex usage page only rendered part of the usage cards; retrying."
+    assert [(metric.label, metric.percent_used) for metric in work.metrics] == [
+        ("Weekly", 22.0)
+    ]
+    assert app._snapshots["codex-home"].metrics[0].percent_used == 11.0  # noqa: SLF001
+
+    app._current_refresh_manual = True  # noqa: SLF001
+    app._on_snapshot(  # noqa: SLF001
+        UsageSnapshot(
+            provider="codex-work", status=SnapshotStatus.OK,
+            metrics=[UsageMetric("Weekly", 37.0)],
+        )
+    )
+    work = app._snapshots["codex-work"]  # noqa: SLF001
+    assert work.status == SnapshotStatus.OK
+    assert [(metric.label, metric.percent_used) for metric in work.metrics] == [
+        ("Weekly", 37.0)
+    ]
+    assert app._snapshots["codex-home"].metrics[0].percent_used == 11.0  # noqa: SLF001
+
+
 def test_lifecycle_context_includes_refresh_state():
     app = App.__new__(App)
     app._started_at = datetime.now() - timedelta(seconds=90)  # noqa: SLF001
