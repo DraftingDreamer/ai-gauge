@@ -43,7 +43,15 @@ notice.
 
 ## Screenshots
 
-**Windows / Linux** — always-on-top floating widget in full and compact modes:
+**DraftingDreamer fork 0.9.0 — Windows**
+
+<p align="center">
+  <img src="docs/screenshots/fork-0.9.0-windows.png" alt="AI Gauge 0.9.0 on Windows showing Claude and Codex usage, Antigravity quotas, and Codex and Claude reset announcements" width="520" />
+</p>
+
+Captured from the running Windows release. Usage values reflect the capture time.
+
+**Upstream UI examples — Windows / Linux** — always-on-top floating widget in full and compact modes:
 
 <p align="center">
   <img src="docs/screenshots/win-panel-full.png" alt="AI Gauge full panel showing provider usage" width="320" />
@@ -51,7 +59,7 @@ notice.
   <img src="docs/screenshots/win-panel-compact.png" alt="AI Gauge collapsed pill mode" width="320" />
 </p>
 
-**macOS** — native menu-bar usage summary:
+**Upstream UI example — macOS** — native menu-bar usage summary:
 
 <p align="center">
   <img src="docs/screenshots/mac-menubar.png" alt="AI Gauge macOS menu-bar item showing provider usage" width="400" />
