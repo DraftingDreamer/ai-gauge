@@ -113,11 +113,7 @@ jobs:
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
           ALL_PROXY: http://127.0.0.1:9
-          http_proxy: http://127.0.0.1:9
-          https_proxy: http://127.0.0.1:9
-          all_proxy: http://127.0.0.1:9
           NO_PROXY: localhost,127.0.0.1,::1
-          no_proxy: localhost,127.0.0.1,::1
         run: |
           .\.venv\Scripts\python.exe tools\check_versions.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -132,11 +128,7 @@ jobs:
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
           ALL_PROXY: http://127.0.0.1:9
-          http_proxy: http://127.0.0.1:9
-          https_proxy: http://127.0.0.1:9
-          all_proxy: http://127.0.0.1:9
           NO_PROXY: localhost,127.0.0.1,::1
-          no_proxy: localhost,127.0.0.1,::1
         run: |
           .venv/bin/python tools/check_versions.py
           .venv/bin/python -m pytest -q
