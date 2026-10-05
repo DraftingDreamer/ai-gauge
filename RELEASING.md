@@ -26,7 +26,12 @@ For AI Gauge, the release page should include:
 The test workflow runs on pull requests and pushes to `main`, across Windows,
 macOS, and Ubuntu with Python 3.11 and 3.12. It runs the version consistency
 check and test suite. A green local run does not substitute for checking the
-actual Actions results on the target commit.
+actual Actions results on the target commit. The same matrix can also be run
+manually for diagnostics:
+
+```text
+gh workflow run test.yml --ref main
+```
 
 Before tagging, confirm `pyproject.toml`, `src/aigauge/__init__.py`, README,
 and CHANGELOG agree on the release version. The local preflight is:
