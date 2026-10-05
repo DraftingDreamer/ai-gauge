@@ -78,6 +78,7 @@ def run_js(tmp_path, script: str, spec: dict) -> dict:
         ["node", str(harness_path), str(spec_path), str(script_path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return json.loads(completed.stdout)

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from unittest.mock import Mock
 from datetime import datetime, timedelta
@@ -359,10 +360,13 @@ def test_normalize_cli_path_trims_and_unquotes(value, expected):
     assert normalize_cli_path(value) == expected
 
 def test_normalize_cli_path_expands_home_and_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("AGY_BIN", str(tmp_path / "agy.exe"))
     assert Path(normalize_cli_path("~/bin/agy.exe")) == tmp_path / "bin" / "agy.exe"
-    assert normalize_cli_path("%AGY_BIN%") == str(tmp_path / "agy.exe")
+    assert normalize_cli_path("$AGY_BIN") == str(tmp_path / "agy.exe")
+    if os.name == "nt":
+        assert normalize_cli_path("%AGY_BIN%") == str(tmp_path / "agy.exe")
 
 def test_provider_uses_explicit_existing_file_without_autodetect(monkeypatch, tmp_path):
     executable = tmp_path / "agy.exe"
